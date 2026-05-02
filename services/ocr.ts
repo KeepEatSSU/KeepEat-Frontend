@@ -21,6 +21,8 @@
 import { isAxiosError } from "axios";
 import * as ImageManipulator from "expo-image-manipulator";
 import { api } from "@/services/api";
+import { tokenStorage } from "@/services/tokenStorage";
+import { API_BASE_URL } from "@/constants/config";
 import { UNITS, type IngredientDraft, type StorageType, type Unit } from "@/constants/domain";
 import type { ApiStorageType } from "@/constants/ingredients-master";
 
@@ -215,19 +217,36 @@ export async function parseReceiptImage(
     "image",
     {
       uri: uploadUri,
-      name: "receipt.jpg",
+      name: "ocr_image.jpg",
       type: "image/jpeg",
-    } as unknown as Blob,
+    } as any,
   );
 
   try {
-    // No explicit headers — the request interceptor strips the inherited
-    // JSON Content-Type for FormData payloads, letting axios + RN's XHR
-    // adapter generate a proper "multipart/form-data; boundary=..." header.
-    const res = await api.post<OcrParseResponse>("/api/v1/ocr/parse", form);
-    return res.data?.candidates ?? [];
-  } catch (e) {
-    const status = isAxiosError(e) ? e.response?.status : undefined;
+    const token = await tokenStorage.getAccessToken();
+    const headers: Record<string, string> = {};
+    if (token) {
+      headers["Authorization"] = `Bearer ${token}`;
+    }
+    // ⚠️ 핵심 조건: `fetch`의 `headers` 객체에는 절대로 `Content-Type`을 적지 말 것!
+    // 비워둬야 RN의 fetch가 자동으로 boundary가 포함된 multipart 헤더를 생성함.
+
+    const response = await fetch(`${API_BASE_URL}/api/v1/ocr/parse`, {
+      method: "POST",
+      headers,
+      body: form,
+    });
+
+    if (!response.ok) {
+      const error: any = new Error("Fetch failed");
+      error.status = response.status;
+      throw error;
+    }
+
+    const data: OcrParseResponse = await response.json();
+    return data.candidates ?? [];
+  } catch (e: any) {
+    const status = isAxiosError(e) ? e.response?.status : e.status;
     throw new OcrParseError(messageForStatus(status), status);
   }
 }
