@@ -6,8 +6,10 @@ import {
   Pressable,
   TextInput,
   ScrollView,
-  Animated,
   StyleSheet,
+  Platform,
+  KeyboardAvoidingView,
+  Keyboard,
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { Ionicons } from "@expo/vector-icons";
@@ -17,7 +19,6 @@ import {
   FontSize,
   FontWeight,
   Radius,
-  Shadows,
   LetterSpacing,
 } from "@/constants/theme";
 import {
@@ -30,7 +31,6 @@ import {
   type RecentEntry,
 } from "@/services/recentIngredients";
 
-const SHEET_HEIGHT = 500;
 const MAX_RESULTS = 50;
 
 interface IngredientPickerSheetProps {
@@ -53,9 +53,6 @@ export function IngredientPickerSheet({
   const [recents, setRecents] = useState<RecentEntry[]>([]);
   const inputRef = useRef<TextInput>(null);
 
-  const backdropOpacity = useRef(new Animated.Value(0)).current;
-  const sheetTranslateY = useRef(new Animated.Value(SHEET_HEIGHT)).current;
-
   // Reset query + reload recents whenever the sheet opens.
   useEffect(() => {
     if (!visible) {
@@ -63,61 +60,27 @@ export function IngredientPickerSheet({
       return;
     }
     getRecentIngredients().then(setRecents);
-    // Autofocus once the open animation has had a chance to start.
+    // Autofocus once the modal has had a chance to render.
     const handle = setTimeout(() => inputRef.current?.focus(), 250);
     return () => clearTimeout(handle);
   }, [visible]);
-
-  useEffect(() => {
-    if (visible) {
-      backdropOpacity.setValue(0);
-      sheetTranslateY.setValue(SHEET_HEIGHT);
-      Animated.parallel([
-        Animated.timing(backdropOpacity, {
-          toValue: 1,
-          duration: 200,
-          useNativeDriver: true,
-        }),
-        Animated.spring(sheetTranslateY, {
-          toValue: 0,
-          damping: 20,
-          stiffness: 200,
-          useNativeDriver: true,
-        }),
-      ]).start();
-    }
-  }, [visible]);
-
-  const animateOut = useCallback(
-    (callback?: () => void) => {
-      Animated.parallel([
-        Animated.timing(backdropOpacity, {
-          toValue: 0,
-          duration: 180,
-          useNativeDriver: true,
-        }),
-        Animated.timing(sheetTranslateY, {
-          toValue: SHEET_HEIGHT,
-          duration: 220,
-          useNativeDriver: true,
-        }),
-      ]).start(() => {
-        onClose();
-        callback?.();
-      });
-    },
-    [onClose, backdropOpacity, sheetTranslateY],
-  );
 
   const handlePick = useCallback(
     (entry: IngredientMasterEntry | RecentEntry) => {
       const payload = { id: entry.id, name: entry.name };
       // Persist to recents asynchronously; UX should not block on storage.
       pushRecentIngredient(payload).catch(() => {});
-      animateOut(() => onSelect(payload));
+      Keyboard.dismiss();
+      onClose();
+      onSelect(payload);
     },
-    [animateOut, onSelect],
+    [onClose, onSelect],
   );
+
+  const handleClose = useCallback(() => {
+    Keyboard.dismiss();
+    onClose();
+  }, [onClose]);
 
   const trimmed = search.trim();
 
@@ -139,36 +102,39 @@ export function IngredientPickerSheet({
   return (
     <Modal
       visible={visible}
-      transparent
-      animationType="none"
-      statusBarTranslucent
-      onRequestClose={() => animateOut()}
+      transparent={false}
+      animationType="slide"
+      presentationStyle="fullScreen"
+      onRequestClose={handleClose}
     >
-      <View style={styles.container}>
-        <Animated.View style={[styles.backdrop, { opacity: backdropOpacity }]}>
-          <Pressable
-            style={StyleSheet.absoluteFill}
-            onPress={() => animateOut()}
-          />
-        </Animated.View>
-
-        <Animated.View
+      <KeyboardAvoidingView
+        style={styles.container}
+        behavior={Platform.OS === "ios" ? "padding" : undefined}
+      >
+        <View
           style={[
-            styles.sheet,
-            { paddingBottom: Math.max(insets.bottom, 20) },
-            { transform: [{ translateY: sheetTranslateY }] },
+            styles.header,
+            { paddingTop: Math.max(insets.top, Spacing.lg) },
           ]}
         >
-          <View style={styles.handleRow}>
-            <View style={styles.handle} />
-          </View>
+          <Pressable
+            onPress={handleClose}
+            style={({ pressed }) => [
+              styles.backButton,
+              pressed && { opacity: 0.6 },
+            ]}
+          >
+            <Ionicons name="chevron-back" size={28} color={Colors.onSurface} />
+          </Pressable>
+          <Text style={styles.headerTitle}>식재료 선택</Text>
+          <View style={styles.headerRight} />
+        </View>
 
-          <Text style={styles.sheetTitle}>식재료 선택</Text>
-
+        <View style={styles.searchContainer}>
           <View style={styles.searchBar}>
             <Ionicons
               name="search"
-              size={18}
+              size={20}
               color={Colors.outline}
               style={{ marginRight: Spacing.sm }}
             />
@@ -187,16 +153,21 @@ export function IngredientPickerSheet({
               <Pressable onPress={() => setSearch("")}>
                 <Ionicons
                   name="close-circle"
-                  size={18}
+                  size={20}
                   color={Colors.outline}
                 />
               </Pressable>
             )}
           </View>
+        </View>
 
+        <View style={styles.listContainer}>
           <ScrollView
             style={styles.list}
-            contentContainerStyle={styles.listContent}
+            contentContainerStyle={[
+              styles.listContent,
+              { paddingBottom: Math.max(insets.bottom, Spacing.xl) },
+            ]}
             showsVerticalScrollIndicator={false}
             keyboardShouldPersistTaps="handled"
           >
@@ -217,7 +188,7 @@ export function IngredientPickerSheet({
                 <View style={styles.placeholderBlock}>
                   <Ionicons
                     name="bookmark-outline"
-                    size={28}
+                    size={40}
                     color={Colors.outlineVariant}
                   />
                   <Text style={styles.placeholderText}>
@@ -241,7 +212,7 @@ export function IngredientPickerSheet({
               <View style={styles.placeholderBlock}>
                 <Ionicons
                   name="leaf-outline"
-                  size={28}
+                  size={40}
                   color={Colors.outlineVariant}
                 />
                 <Text style={styles.placeholderText}>
@@ -253,8 +224,8 @@ export function IngredientPickerSheet({
               </View>
             )}
           </ScrollView>
-        </Animated.View>
-      </View>
+        </View>
+      </KeyboardAvoidingView>
     </Modal>
   );
 }
@@ -299,32 +270,38 @@ function PickerRow({
 }
 
 const styles = StyleSheet.create({
-  container: { flex: 1, justifyContent: "flex-end" },
-  backdrop: {
-    ...StyleSheet.absoluteFillObject,
-    backgroundColor: "rgba(25, 28, 29, 0.35)",
+  container: {
+    flex: 1,
+    backgroundColor: Colors.surface,
   },
-  sheet: {
-    backgroundColor: Colors.surfaceContainerLowest,
-    borderTopLeftRadius: Radius.xxl,
-    borderTopRightRadius: Radius.xxl,
-    paddingHorizontal: Spacing.xl,
-    maxHeight: "75%",
-    ...Shadows.ambient,
+  header: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    paddingHorizontal: Spacing.sm,
+    paddingBottom: Spacing.md,
+    backgroundColor: Colors.surface,
   },
-  handleRow: { alignItems: "center", paddingTop: Spacing.md, paddingBottom: Spacing.sm },
-  handle: {
-    width: 36,
-    height: 4,
-    borderRadius: Radius.full,
-    backgroundColor: Colors.surfaceContainerHighest,
+  backButton: {
+    padding: Spacing.xs,
+    justifyContent: "center",
+    alignItems: "center",
+    width: 48,
+    height: 48,
   },
-  sheetTitle: {
+  headerTitle: {
     fontSize: FontSize.titleLg,
     fontWeight: FontWeight.bold,
     color: Colors.onSurface,
     letterSpacing: LetterSpacing.tight,
-    marginBottom: Spacing.base,
+  },
+  headerRight: {
+    width: 48,
+  },
+  searchContainer: {
+    paddingHorizontal: Spacing.xl,
+    paddingBottom: Spacing.md,
+    backgroundColor: Colors.surface,
   },
   searchBar: {
     flexDirection: "row",
@@ -333,7 +310,6 @@ const styles = StyleSheet.create({
     borderRadius: Radius.lg,
     paddingHorizontal: Spacing.base,
     paddingVertical: Spacing.md,
-    marginBottom: Spacing.base,
   },
   searchInput: {
     flex: 1,
@@ -343,15 +319,23 @@ const styles = StyleSheet.create({
     padding: 0,
     margin: 0,
   },
-  list: { flexGrow: 0 },
-  listContent: { paddingBottom: Spacing.lg },
+  listContainer: {
+    flex: 1,
+    backgroundColor: Colors.surfaceContainerLowest,
+  },
+  list: {
+    flex: 1,
+  },
+  listContent: {
+    paddingHorizontal: Spacing.xl,
+    paddingTop: Spacing.lg,
+  },
   sectionLabel: {
     fontSize: FontSize.labelSm,
     fontWeight: FontWeight.bold,
     color: Colors.onSurfaceVariant,
     textTransform: "uppercase",
     letterSpacing: LetterSpacing.wide,
-    marginTop: Spacing.xs,
     marginBottom: Spacing.sm,
   },
   categoryItem: {
@@ -361,36 +345,41 @@ const styles = StyleSheet.create({
     paddingVertical: Spacing.base,
     paddingHorizontal: Spacing.base,
     borderRadius: Radius.lg,
-    minHeight: 52,
+    minHeight: 56,
     marginBottom: Spacing.xs,
   },
-  categoryItemSelected: { backgroundColor: "rgba(0, 109, 55, 0.07)" },
+  categoryItemSelected: {
+    backgroundColor: "rgba(0, 109, 55, 0.07)",
+  },
   categoryText: {
     fontSize: FontSize.bodyLg,
     fontWeight: FontWeight.medium,
     color: Colors.onSurface,
   },
-  categoryTextSelected: { fontWeight: FontWeight.bold, color: Colors.primary },
+  categoryTextSelected: {
+    fontWeight: FontWeight.bold,
+    color: Colors.primary,
+  },
   placeholderBlock: {
     alignItems: "center",
-    paddingTop: Spacing.xxl + Spacing.sm,
+    paddingTop: Spacing.xxxl,
     paddingBottom: Spacing.xxl,
     gap: Spacing.sm,
   },
   placeholderText: {
-    fontSize: FontSize.bodyMd,
+    fontSize: FontSize.bodyLg,
     fontWeight: FontWeight.semiBold,
     color: Colors.onSurfaceVariant,
     textAlign: "center",
   },
   placeholderHint: {
-    fontSize: FontSize.bodySm,
+    fontSize: FontSize.bodyMd,
     fontWeight: FontWeight.medium,
     color: Colors.outline,
     textAlign: "center",
   },
   placeholderRequest: {
-    fontSize: FontSize.bodyMd,
+    fontSize: FontSize.bodyLg,
     fontWeight: FontWeight.bold,
     color: Colors.primary,
     textAlign: "center",

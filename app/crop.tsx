@@ -2,15 +2,23 @@ import { useState, useEffect, useRef, useCallback } from "react";
 import {
   View,
   Text,
-  Image,
   Pressable,
   ActivityIndicator,
   StyleSheet,
+  Image,
 } from "react-native";
 import { useRouter, useLocalSearchParams } from "expo-router";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { LinearGradient } from "expo-linear-gradient";
 import { Ionicons } from "@expo/vector-icons";
+import Animated, {
+  useSharedValue,
+  useAnimatedStyle,
+  withTiming,
+} from "react-native-reanimated";
+import { Gesture, GestureDetector } from "react-native-gesture-handler";
+import * as ImageManipulator from "expo-image-manipulator";
+
 import {
   Colors,
   Spacing,
@@ -86,6 +94,76 @@ export default function CropScreen() {
   const progressRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const tipRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
+  // Original image pixel dimensions
+  const [imageSize, setImageSize] = useState({ width: 0, height: 0 });
+  // Container view layout dimensions
+  const [layout, setLayout] = useState({ width: 0, height: 0 });
+
+  useEffect(() => {
+    if (uri) {
+      Image.getSize(
+        uri,
+        (width, height) => {
+          setImageSize({ width, height });
+        },
+        () => {
+          showToast("이미지 크기를 불러오는데 실패했습니다.");
+        }
+      );
+    }
+  }, [uri]);
+
+  // Gestures state
+  const scale = useSharedValue(1);
+  const savedScale = useSharedValue(1);
+  const translateX = useSharedValue(0);
+  const translateY = useSharedValue(0);
+  const savedTranslateX = useSharedValue(0);
+  const savedTranslateY = useSharedValue(0);
+  const hasInteracted = useSharedValue(false);
+
+  const pinchGesture = Gesture.Pinch()
+    .onBegin(() => {
+      hasInteracted.value = true;
+    })
+    .onUpdate((e) => {
+      scale.value = savedScale.value * e.scale;
+    })
+    .onEnd(() => {
+      savedScale.value = scale.value;
+    });
+
+  const panGesture = Gesture.Pan()
+    .onBegin(() => {
+      hasInteracted.value = true;
+    })
+    .onUpdate((e) => {
+      translateX.value = savedTranslateX.value + e.translationX;
+      translateY.value = savedTranslateY.value + e.translationY;
+    })
+    .onEnd(() => {
+      savedTranslateX.value = translateX.value;
+      savedTranslateY.value = translateY.value;
+    });
+
+  const composedGesture = Gesture.Simultaneous(pinchGesture, panGesture);
+
+  const animatedStyle = useAnimatedStyle(() => {
+    return {
+      transform: [
+        { translateX: translateX.value },
+        { translateY: translateY.value },
+        { scale: scale.value },
+      ],
+    };
+  });
+
+  const overlayAnimatedStyle = useAnimatedStyle(() => {
+    return {
+      opacity: withTiming(hasInteracted.value ? 0 : 1, { duration: 200 }),
+    };
+  });
+
   const cleanup = useCallback(() => {
     if (progressRef.current) clearInterval(progressRef.current);
     if (tipRef.current) clearInterval(tipRef.current);
@@ -100,14 +178,16 @@ export default function CropScreen() {
       showToast("사진을 다시 선택해주세요");
       return;
     }
+    if (imageSize.width === 0 || layout.width === 0) {
+      showToast("이미지 로딩 중입니다. 잠시만 기다려주세요.");
+      return;
+    }
     if (isProcessing) return;
 
     setIsProcessing(true);
     setProgress(0);
     setTipIndex(0);
 
-    // Simulated progress curve runs in parallel with the actual upload.
-    // Caps at 95% until the response lands; jumps to 100% on success.
     const startTime = Date.now();
     progressRef.current = setInterval(() => {
       const elapsed = Date.now() - startTime;
@@ -126,18 +206,78 @@ export default function CropScreen() {
     }, 3000);
 
     try {
-      const candidates = await parseReceiptImage(uri);
+      // 1. Calculate Crop Box
+      const cw = layout.width;
+      const ch = layout.height;
+      const W = imageSize.width;
+      const H = imageSize.height;
+
+      const coverRatio = Math.max(cw / W, ch / H);
+      const imageRenderWidth = W * coverRatio;
+      const imageRenderHeight = H * coverRatio;
+      const imageContentLeft = (cw - imageRenderWidth) / 2;
+      const imageContentTop = (ch - imageRenderHeight) / 2;
+
+      // Crop Window layout defined by styles (top 20%, left 10%, width 80%, height 60%)
+      const CROP_LEFT = cw * 0.1;
+      const CROP_TOP = ch * 0.2;
+      const CROP_WIDTH = cw * 0.8;
+      const CROP_HEIGHT = ch * 0.6;
+
+      const tx = translateX.value;
+      const ty = translateY.value;
+      const s = scale.value;
+
+      const getPixelX = (viewX: number) => {
+        const px = viewX - cw / 2;
+        const ix = (px - tx) / s + cw / 2;
+        return (ix - imageContentLeft) / coverRatio;
+      };
+
+      const getPixelY = (viewY: number) => {
+        const py = viewY - ch / 2;
+        const iy = (py - ty) / s + ch / 2;
+        return (iy - imageContentTop) / coverRatio;
+      };
+
+      let pixelX = getPixelX(CROP_LEFT);
+      let pixelY = getPixelY(CROP_TOP);
+      let pixelX_br = getPixelX(CROP_LEFT + CROP_WIDTH);
+      let pixelY_br = getPixelY(CROP_TOP + CROP_HEIGHT);
+
+      // Math.round to make it pixel-perfect integer
+      const originX = Math.round(Math.max(0, Math.min(W, pixelX)));
+      const originY = Math.round(Math.max(0, Math.min(H, pixelY)));
+      const endX = Math.round(Math.max(0, Math.min(W, pixelX_br)));
+      const endY = Math.round(Math.max(0, Math.min(H, pixelY_br)));
+
+      const cropWidth = endX - originX;
+      const cropHeight = endY - originY;
+
+      if (cropWidth <= 0 || cropHeight <= 0) {
+        throw new Error("크롭 영역이 유효하지 않습니다.");
+      }
+
+      // 2. Manipulate Image
+      const manipResult = await ImageManipulator.manipulateAsync(
+        uri,
+        [{ crop: { originX, originY, width: cropWidth, height: cropHeight } }],
+        { format: ImageManipulator.SaveFormat.JPEG, compress: 1.0 }
+      );
+
+      // 3. Upload to OCR
+      const candidates = await parseReceiptImage(manipResult.uri);
+      
       cleanup();
       setProgress(100);
       ocrPending.set(candidates);
-      // Brief 100% beat before navigating so the bar fill reads as success.
       setTimeout(() => {
         setIsProcessing(false);
         setProgress(0);
         setTipIndex(0);
         router.push("/add-confirm" as never);
       }, 300);
-    } catch (e) {
+    } catch (e: any) {
       cleanup();
       setIsProcessing(false);
       setProgress(0);
@@ -145,7 +285,7 @@ export default function CropScreen() {
       const msg =
         e instanceof OcrParseError
           ? e.message
-          : "OCR을 처리하지 못했어요. 잠시 후 다시 시도해주세요";
+          : e.message || "OCR을 처리하지 못했어요. 잠시 후 다시 시도해주세요";
       showToast(msg);
     }
   };
@@ -174,10 +314,23 @@ export default function CropScreen() {
 
       {/* ── Main area ── */}
       <View style={styles.mainArea}>
-        <View style={styles.imageContainer}>
-          {/* Single source image */}
+        <View 
+          style={styles.imageContainer}
+          onLayout={(e) => {
+            setLayout({
+              width: e.nativeEvent.layout.width,
+              height: e.nativeEvent.layout.height,
+            });
+          }}
+        >
           {uri ? (
-            <Image source={{ uri }} style={styles.image} resizeMode="cover" />
+            <GestureDetector gesture={composedGesture}>
+              <Animated.Image
+                source={{ uri }}
+                style={[styles.image, animatedStyle]}
+                resizeMode="cover"
+              />
+            </GestureDetector>
           ) : (
             <View style={[styles.image, styles.imagePlaceholder]}>
               <Ionicons name="image-outline" size={48} color={Colors.outline} />
@@ -195,21 +348,22 @@ export default function CropScreen() {
 
           {/* Crop frame (handles + grid + pinch icon) */}
           <View style={styles.cropRegion} pointerEvents="none">
-            <View style={styles.cropBox}>
+            <Animated.View style={[styles.cropBox, overlayAnimatedStyle]}>
               <View style={styles.gridVertical1} />
               <View style={styles.gridVertical2} />
               <View style={styles.gridHorizontal1} />
               <View style={styles.gridHorizontal2} />
-            </View>
+            </Animated.View>
 
             <CornerHandle position="tl" />
             <CornerHandle position="tr" />
             <CornerHandle position="bl" />
             <CornerHandle position="br" />
 
-            <View style={styles.pinchIcon}>
+            {/* Hint icon only, since pinch applies anywhere */}
+            <Animated.View style={[styles.pinchIcon, overlayAnimatedStyle]}>
               <Ionicons name="resize" size={28} color="#FFFFFF" />
-            </View>
+            </Animated.View>
           </View>
         </View>
 
@@ -256,8 +410,6 @@ export default function CropScreen() {
 }
 
 // ─── Styles ───────────────────────────────────────────────────────────────────
-
-const GRID_LINE_COLOR = "rgba(255, 255, 255, 0.25)";
 
 const styles = StyleSheet.create({
   screen: {
@@ -333,7 +485,7 @@ const styles = StyleSheet.create({
     backgroundColor: "rgba(0, 0, 0, 0.50)",
   },
 
-  // Crop frame overlay (handles, grid, pinch)
+  // Crop frame overlay (handles, pinch)
   cropRegion: {
     position: "absolute",
     top: "20%",
@@ -345,38 +497,6 @@ const styles = StyleSheet.create({
     flex: 1,
     borderRadius: Radius.md,
     overflow: "hidden",
-  },
-  gridVertical1: {
-    position: "absolute",
-    left: "33.33%",
-    top: 0,
-    bottom: 0,
-    width: 1,
-    backgroundColor: GRID_LINE_COLOR,
-  },
-  gridVertical2: {
-    position: "absolute",
-    left: "66.66%",
-    top: 0,
-    bottom: 0,
-    width: 1,
-    backgroundColor: GRID_LINE_COLOR,
-  },
-  gridHorizontal1: {
-    position: "absolute",
-    top: "33.33%",
-    left: 0,
-    right: 0,
-    height: 1,
-    backgroundColor: GRID_LINE_COLOR,
-  },
-  gridHorizontal2: {
-    position: "absolute",
-    top: "66.66%",
-    left: 0,
-    right: 0,
-    height: 1,
-    backgroundColor: GRID_LINE_COLOR,
   },
   cornerHandle: {
     position: "absolute",
