@@ -1,0 +1,233 @@
+/**
+ * KeepEat — receipt OCR service.
+ *
+ * Wraps `POST /api/v1/ocr/parse` and converts the backend's candidate
+ * shape into `IngredientDraft` so the add-confirm screen can seed itself
+ * with no further translation.
+ *
+ * Backend contract assumes every returned candidate is `MATCHED` — the
+ * server runs an embedding-similarity step plus an AI fallback that
+ * auto-creates new master ingredients when needed. The client therefore
+ * doesn't surface UNMATCHED branches.
+ *
+ * Usage:
+ *   const candidates = await parseReceiptImage(localUri);
+ *   ocrPending.set(candidates);                       // stash
+ *   router.replace("/add-confirm");                   // navigate
+ *   // …in add-confirm:
+ *   const seeds = ocrPending.consume();               // read + clear
+ */
+
+import { isAxiosError } from "axios";
+import * as ImageManipulator from "expo-image-manipulator";
+import { api } from "@/services/api";
+import { UNITS, type IngredientDraft, type StorageType, type Unit } from "@/constants/domain";
+import type { ApiStorageType } from "@/constants/ingredients-master";
+
+// ─── Backend DTOs ────────────────────────────────────────────────────────────
+
+interface OcrStorageOption {
+  storageType: ApiStorageType;
+  minDays: number;
+  maxDays: number;
+}
+
+export interface OcrIngredientCandidate {
+  rawName: string;
+  customName: string;
+  quantity: number;
+  unit: string;
+  matchStatus: "MATCHED" | "UNMATCHED";
+  /** Null when matchStatus === "UNMATCHED" — backend couldn't link to master. */
+  ingredientId: number | null;
+  ingredientName: string | null;
+  storageOptions: OcrStorageOption[];
+}
+
+interface OcrParseResponse {
+  candidates: OcrIngredientCandidate[];
+}
+
+// ─── Mapping ─────────────────────────────────────────────────────────────────
+
+const API_TO_DOMAIN_STORAGE: Record<ApiStorageType, StorageType> = {
+  실온: "room",
+  냉장: "fridge",
+  냉동: "frozen",
+};
+
+function pickStorageOption(
+  options: OcrStorageOption[],
+): { storage: StorageType; avgDays: number } {
+  const first = options[0];
+  if (!first) return { storage: "fridge", avgDays: 7 };
+  const avgDays = Math.max(1, Math.round((first.minDays + first.maxDays) / 2));
+  return { storage: API_TO_DOMAIN_STORAGE[first.storageType], avgDays };
+}
+
+function startOfDayPlus(days: number): Date {
+  const d = new Date();
+  d.setHours(0, 0, 0, 0);
+  d.setDate(d.getDate() + days);
+  return d;
+}
+
+export function mapOcrCandidateToDraft(
+  candidate: OcrIngredientCandidate,
+): IngredientDraft {
+  const unit: Unit = (UNITS as readonly string[]).includes(candidate.unit)
+    ? (candidate.unit as Unit)
+    : "g";
+
+  // Local id for list keying — combines candidate identity with random suffix
+  // so the same ingredient appearing twice on a receipt still gets unique keys.
+  const seed = candidate.ingredientId ?? candidate.rawName;
+  const localId = `ocr-${seed}-${Date.now()}-${Math.random()
+    .toString(36)
+    .slice(2, 6)}`;
+
+  // UNMATCHED branch: backend couldn't link this scan to a master entry.
+  // Surface the raw text in `name` so the user sees what was detected, leave
+  // `ingredientId` undefined so the registration guard keeps the picker
+  // requirement, and skip auto-expiry since we have no storage options.
+  if (candidate.matchStatus === "UNMATCHED" || candidate.ingredientId == null) {
+    return {
+      id: localId,
+      ingredientId: undefined,
+      name: candidate.rawName ?? "",
+      nickname: candidate.customName ?? "",
+      quantity: candidate.quantity,
+      unit,
+      storage: "fridge",
+      expirationDate: null,
+    };
+  }
+
+  // MATCHED branch.
+  const { storage, avgDays } = pickStorageOption(candidate.storageOptions);
+  return {
+    id: localId,
+    ingredientId: candidate.ingredientId,
+    name: candidate.ingredientName ?? candidate.rawName ?? "",
+    nickname: candidate.customName ?? "",
+    quantity: candidate.quantity,
+    unit,
+    storage,
+    expirationDate: startOfDayPlus(avgDays),
+  };
+}
+
+// ─── Pending-candidates handoff (crop → add-confirm) ─────────────────────────
+// In-memory only. The two screens are part of the same navigation step so
+// nothing needs to survive a process restart, and AsyncStorage / search
+// params would just add latency or length-limit risk.
+
+let pending: OcrIngredientCandidate[] | null = null;
+
+export const ocrPending = {
+  set(candidates: OcrIngredientCandidate[]): void {
+    pending = candidates;
+  },
+  consume(): OcrIngredientCandidate[] | null {
+    const out = pending;
+    pending = null;
+    return out;
+  },
+  /** Clears without returning. Use on unmount of crop screen if cancelled. */
+  clear(): void {
+    pending = null;
+  },
+};
+
+// ─── Errors ──────────────────────────────────────────────────────────────────
+
+export class OcrParseError extends Error {
+  constructor(
+    /** Friendly Korean message ready to show in a toast. */
+    message: string,
+    /** HTTP status if known. */
+    public readonly status?: number,
+  ) {
+    super(message);
+    this.name = "OcrParseError";
+  }
+}
+
+function messageForStatus(status: number | undefined): string {
+  switch (status) {
+    case 400:
+      return "사진을 다시 촬영해주세요";
+    case 422:
+      return "식재료를 인식할 수 없어요. 직접 추가해보세요";
+    case 502:
+      return "잠시 후 다시 시도해주세요";
+    default:
+      return "OCR을 처리하지 못했어요. 잠시 후 다시 시도해주세요";
+  }
+}
+
+const PREPROCESS_FAILED_MESSAGE = "이미지 처리 중 문제가 발생했어요";
+
+// ─── Service ─────────────────────────────────────────────────────────────────
+
+/**
+ * Uploads a local image URI to the OCR endpoint and returns the parsed
+ * candidate list. Throws `OcrParseError` with a user-friendly message
+ * on failure.
+ */
+/**
+ * Normalize whatever the picker / camera gave us (PNG on simulator, HEIC on
+ * iOS device, etc.) to a JPEG so the backend's OCR pipeline doesn't need to
+ * understand exotic codecs. compress 0.8 keeps OCR-quality text readable
+ * while halving typical upload size.
+ */
+async function toJpegUri(sourceUri: string): Promise<string> {
+  const result = await ImageManipulator.manipulateAsync(
+    sourceUri,
+    [],
+    { format: ImageManipulator.SaveFormat.JPEG, compress: 0.8 },
+  );
+  return result.uri;
+}
+
+export async function parseReceiptImage(
+  imageUri: string,
+): Promise<OcrIngredientCandidate[]> {
+  // TEMP: surface the URI scheme during integration debugging. Remove once
+  // we've confirmed multipart uploads land cleanly across iOS / Android.
+  if (__DEV__) console.log("[OCR] uri:", imageUri);
+
+  // Step 1: convert to JPEG. Failure here is a client-side issue distinct
+  // from server errors, so surface a different toast.
+  let uploadUri: string;
+  try {
+    uploadUri = await toJpegUri(imageUri);
+  } catch (e) {
+    if (__DEV__) console.log("[OCR] preprocess failed:", e);
+    throw new OcrParseError(PREPROCESS_FAILED_MESSAGE);
+  }
+  if (__DEV__) console.log("[OCR] converted uri:", uploadUri);
+
+  const form = new FormData();
+  // RN's FormData accepts the {uri,name,type} shape — TS DOM lib doesn't model
+  // it, so cast through unknown to silence the structural mismatch.
+  form.append(
+    "image",
+    {
+      uri: uploadUri,
+      name: "receipt.jpg",
+      type: "image/jpeg",
+    } as unknown as Blob,
+  );
+
+  try {
+    // No explicit headers — the request interceptor strips the inherited
+    // JSON Content-Type for FormData payloads, letting axios + RN's XHR
+    // adapter generate a proper "multipart/form-data; boundary=..." header.
+    const res = await api.post<OcrParseResponse>("/api/v1/ocr/parse", form);
+    return res.data?.candidates ?? [];
+  } catch (e) {
+    const status = isAxiosError(e) ? e.response?.status : undefined;
+    throw new OcrParseError(messageForStatus(status), status);
+  }
+}
