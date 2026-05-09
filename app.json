@@ -29,10 +29,10 @@
       "edgeToEdgeEnabled": true,
       "predictiveBackGestureEnabled": false,
       "permissions": [
-        "android.permission.RECORD_AUDIO",
         "android.permission.RECORD_AUDIO"
       ],
-      "package": "com.anonymous.keepeat_front"
+      "package": "com.anonymous.keepeat_front",
+      "googleServicesFile": "./google-services.json"
     },
     "web": {
       "output": "static",
@@ -60,11 +60,19 @@
         }
       ],
       "@react-native-community/datetimepicker",
-      "expo-secure-store"
+      "expo-secure-store",
+      "expo-notifications"
     ],
     "experiments": {
       "typedRoutes": true,
       "reactCompiler": true
-    }
+    },
+    "extra": {
+      "router": {},
+      "eas": {
+        "projectId": "beddba66-8ff1-4ea0-a4a3-d1a1d7d4e47e"
+      }
+    },
+    "owner": "dltjsdyd63"
   }
 }

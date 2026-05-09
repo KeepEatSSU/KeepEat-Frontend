@@ -52,6 +52,7 @@ export interface Recipe {
   difficulty: string;
   time: string;
   kcal: string;
+  method?: string;
   ingredients?: string[];
   /** Simple cooking-order list for the swipe card's flip-back face. */
   steps?: string[];

@@ -1,5 +1,6 @@
 import { type Recipe } from "@/constants/domain";
-import { RECOMMENDED_RECIPES_POOL } from "@/mocks";
+import { generateAiRecipes, mapDifficulty } from "@/services/recipes";
+import { isAxiosError } from "axios";
 import * as Notifications from "expo-notifications";
 import {
   createContext,
@@ -10,6 +11,7 @@ import {
   useState,
 } from "react";
 import { AppState, AppStateStatus } from "react-native";
+import { useToast } from "@/components/Toast";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -29,7 +31,7 @@ interface RecipeRecommendationState {
 }
 
 interface RecipeRecommendationContextValue extends RecipeRecommendationState {
-  requestRecommendation: () => void;
+  requestRecommendation: () => Promise<void>;
   markSwiping: () => void;
   saveRecipe: (recipe: Recipe) => void;
   discardRecipe: (recipe: Recipe) => void;
@@ -60,7 +62,7 @@ const RecipeRecommendationContext =
     savedRecipes: [],
     requestedAt: null,
     completedAt: null,
-    requestRecommendation: () => {},
+    requestRecommendation: async () => {},
     markSwiping: () => {},
     saveRecipe: () => {},
     discardRecipe: () => {},
@@ -87,7 +89,7 @@ export function RecipeRecommendationProvider({
     completedAt: null,
   });
 
-  const timerRef = useRef<ReturnType<typeof setTimeout>>();
+  const { showToast } = useToast();
   const appStateRef = useRef<AppStateStatus>(AppState.currentState);
   const onCompleteRef = useRef<(() => void) | null>(null);
 
@@ -95,18 +97,14 @@ export function RecipeRecommendationProvider({
     onCompleteRef.current = cb;
   }, []);
 
-  // Request notification permission once on mount. Only prompts if the user
-  // hasn't made a decision yet (getPermissionsAsync returns "undetermined");
-  // already-granted or already-denied states are respected without a re-prompt.
-  // Silent failure — a rejected permission should not crash the app; the push
-  // path in handleCompletion is already best-effort (no await).
+  // Request notification permission once on mount.
   useEffect(() => {
     (async () => {
       try {
         const current = await Notifications.getPermissionsAsync();
         if (
           current.status === "undetermined" ||
-          current.canAskAgain === true && current.status !== "granted"
+          (current.canAskAgain === true && current.status !== "granted")
         ) {
           await Notifications.requestPermissionsAsync();
         }
@@ -122,13 +120,6 @@ export function RecipeRecommendationProvider({
       appStateRef.current = next;
     });
     return () => sub.remove();
-  }, []);
-
-  // Cleanup timer on unmount
-  useEffect(() => {
-    return () => {
-      if (timerRef.current) clearTimeout(timerRef.current);
-    };
   }, []);
 
   const handleCompletion = useCallback(
@@ -158,7 +149,7 @@ export function RecipeRecommendationProvider({
     [],
   );
 
-  const requestRecommendation = useCallback(() => {
+  const requestRecommendation = useCallback(async () => {
     if (state.status === "loading") return;
 
     setState((prev) => ({
@@ -170,17 +161,34 @@ export function RecipeRecommendationProvider({
       completedAt: null,
     }));
 
-    // TODO: 실제 API 연동 시 제거. 현재 10초 시뮬레이션
-    const delay = 10000;
-    timerRef.current = setTimeout(() => {
-      // Pick 5 random recipes from pool
-      const shuffled = [...RECOMMENDED_RECIPES_POOL].sort(
-        () => Math.random() - 0.5,
-      );
-      const picked = shuffled.slice(0, 5);
-      handleCompletion(picked);
-    }, delay);
-  }, [state.status, handleCompletion]);
+    try {
+      const generated = await generateAiRecipes();
+      // Map GeneratedRecipeDto back to domain Recipe to feed the swipe UI
+      const mappedRecipes: Recipe[] = generated.map((dto, i) => ({
+        id: `ai-gen-${Date.now()}-${i}`,
+        title: dto.recipeName,
+        time: dto.cookingTime,
+        difficulty: mapDifficulty(dto.difficulty),
+        kcal: dto.calories,
+        method: dto.cookingMethod,
+        ingredients: dto.requiredIngredients.map((ing) => ing.name),
+        steps: dto.instructions,
+        matchCount: dto.requiredIngredients.length,
+        totalCount: dto.requiredIngredients.length,
+      }));
+
+      handleCompletion(mappedRecipes);
+    } catch (error) {
+      console.error("[Recipe Gen Error]", error);
+      setState((prev) => ({ ...prev, status: "idle" }));
+      if (isAxiosError(error) && error.response?.status === 400) {
+        const errorMessage = error.response?.data?.message || "식재료가 부족해요. 냉장고를 더 채워주세요!";
+        showToast(errorMessage);
+      } else {
+        showToast("레시피를 생성하는 중에 오류가 발생했어요.");
+      }
+    }
+  }, [state.status, handleCompletion, showToast]);
 
   const markSwiping = useCallback(() => {
     setState((prev) => ({ ...prev, status: "swiping" }));
@@ -194,7 +202,7 @@ export function RecipeRecommendationProvider({
   }, []);
 
   const discardRecipe = useCallback((_recipe: Recipe) => {
-    // No-op for now — just removes from the swipe stack by not saving
+    // No-op for now
   }, []);
 
   const finishSwiping = useCallback(() => {
@@ -206,7 +214,6 @@ export function RecipeRecommendationProvider({
   }, []);
 
   const reset = useCallback(() => {
-    if (timerRef.current) clearTimeout(timerRef.current);
     setState({
       status: "idle",
       recommendedRecipes: [],

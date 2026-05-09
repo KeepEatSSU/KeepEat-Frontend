@@ -1,43 +1,43 @@
-import { useState, useCallback } from "react";
-import {
-  View,
-  Text,
-  Pressable,
-  Dimensions,
-  BackHandler,
-  StyleSheet,
-  ScrollView,
-  Platform,
-} from "react-native";
-import { useRouter } from "expo-router";
-import { useSafeAreaInsets } from "react-native-safe-area-context";
-import { Ionicons } from "@expo/vector-icons";
-import Animated, {
-  useSharedValue,
-  useAnimatedStyle,
-  withSpring,
-  withTiming,
-  runOnJS,
-  interpolate,
-  interpolateColor,
-  Extrapolation,
-  Easing,
-} from "react-native-reanimated";
-import { Gesture, GestureDetector } from "react-native-gesture-handler";
-import {
-  Colors,
-  Spacing,
-  FontSize,
-  FontWeight,
-  Radius,
-  Shadows,
-  LetterSpacing,
-} from "@/constants/theme";
-import { type Recipe } from "@/constants/domain";
-import { useRecipeRecommendation } from "@/context/RecipeRecommendationContext";
 import { ConfirmModal } from "@/components/ConfirmModal";
 import { useToast } from "@/components/Toast";
-import { useEffect } from "react";
+import { type Recipe } from "@/constants/domain";
+import {
+  Colors,
+  FontSize,
+  FontWeight,
+  LetterSpacing,
+  Radius,
+  Shadows,
+  Spacing,
+} from "@/constants/theme";
+import { useRecipeRecommendation } from "@/context/RecipeRecommendationContext";
+import { saveRecipes, mapDifficultyToBackend, type GeneratedRecipeDto } from "@/services/recipes";
+import { Ionicons } from "@expo/vector-icons";
+import { useRouter } from "expo-router";
+import { useCallback, useEffect, useState } from "react";
+import {
+  BackHandler,
+  Dimensions,
+  Platform,
+  Pressable,
+  ScrollView,
+  StyleSheet,
+  Text,
+  View,
+} from "react-native";
+import { Gesture, GestureDetector } from "react-native-gesture-handler";
+import Animated, {
+  Easing,
+  Extrapolation,
+  interpolate,
+  interpolateColor,
+  runOnJS,
+  useAnimatedStyle,
+  useSharedValue,
+  withSpring,
+  withTiming,
+} from "react-native-reanimated";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 const { width: SCREEN_WIDTH } = Dimensions.get("window");
 const SWIPE_THRESHOLD = SCREEN_WIDTH * 0.3;
@@ -384,11 +384,31 @@ export default function RecipeSwipeScreen() {
     return () => handler.remove();
   }, []);
 
-  const handleSwipeRight = useCallback(() => {
+  const handleSwipeRight = useCallback(async () => {
     const recipe = recommendedRecipes[currentIndex];
     if (recipe) {
-      saveRecipe(recipe);
-      showToast("레시피를 저장했어요");
+      try {
+        const validMethods = ["볶음", "국/찌개/탕", "찜/조림", "구이/전", "무침/샐러드", "면/만두", "밥/죽/샌드위치", "오븐/베이킹", "기타"];
+        const method = recipe.method || "기타"; 
+
+        const dto: GeneratedRecipeDto = {
+          recipeName: recipe.title,
+          difficulty: mapDifficultyToBackend(recipe.difficulty),
+          cookingMethod: validMethods.includes(method) ? method : "기타",
+          cookingTime: recipe.time,
+          calories: recipe.kcal,
+          requiredIngredients: (recipe.ingredients || []).map((ing) => ({
+            name: ing,
+            amount: "적당량", // Fallback for simple array format
+          })),
+          instructions: recipe.steps || [],
+        };
+        await saveRecipes([dto]);
+        saveRecipe(recipe);
+        showToast("레시피를 저장했어요");
+      } catch (e: any) {
+        showToast(e.response?.data?.message || "레시피 저장에 실패했습니다.");
+      }
     }
     setCurrentIndex((i) => i + 1);
   }, [currentIndex, recommendedRecipes, saveRecipe, showToast]);
@@ -742,7 +762,7 @@ const styles = StyleSheet.create({
     color: Colors.outline,
   },
 
-  // Bottom buttons
+// Bottom buttons
   bottomBtns: {
     flexDirection: "row",
     justifyContent: "center",

@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useCallback, useMemo } from "react";
 import {
   View,
   Text,
@@ -8,7 +8,7 @@ import {
   ActivityIndicator,
   StyleSheet,
 } from "react-native";
-import { useRouter } from "expo-router";
+import { useRouter, useFocusEffect } from "expo-router";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { Ionicons } from "@expo/vector-icons";
 import {
@@ -20,11 +20,10 @@ import {
   Shadows,
   LetterSpacing,
 } from "@/constants/theme";
-import { RECIPE_FILTERS } from "@/constants/filters";
-import type { Recipe } from "@/constants/domain";
-import { MOCK_RECIPES } from "@/mocks";
 import { useRecipeRecommendation } from "@/context/RecipeRecommendationContext";
 import { useToast } from "@/components/Toast";
+import { getMyRecipes, mapDifficulty } from "@/services/recipes";
+import type { Recipe } from "@/constants/domain";
 
 // ─── Recipe Card ──────────────────────────────────────────────────────────────
 
@@ -41,11 +40,10 @@ function RecipeCard({ item }: { item: Recipe }) {
         <Text style={styles.cardTitle} numberOfLines={2} ellipsizeMode="tail">
           {item.title}
         </Text>
-        <Text style={styles.matchText}>
-          <Text style={styles.matchHighlight}>{item.matchCount}</Text>
-          /{item.totalCount}개 보유
-        </Text>
       </View>
+      <Text style={styles.cardDescription} numberOfLines={2}>
+        {item.description}
+      </Text>
 
       <View style={styles.metaRow}>
         <View style={styles.metaItem}>
@@ -76,6 +74,67 @@ export default function RecipeScreen() {
   const { status, requestRecommendation, markSwiping, onComplete } =
     useRecipeRecommendation();
 
+  const categories = [
+    "전체",
+    "볶음",
+    "국/찌개/탕",
+    "찜/조림",
+    "구이/전",
+    "무침/샐러드",
+    "면/만두",
+    "밥/죽/샌드위치",
+    "오븐/베이킹",
+    "기타",
+  ];
+
+  const [selectedCategory, setSelectedCategory] = useState("전체");
+  const [searchQuery, setSearchQuery] = useState("");
+  const [myRecipes, setMyRecipes] = useState<Recipe[]>([]);
+  const [isLoadingRecipes, setIsLoadingRecipes] = useState(false);
+
+  // Fetch saved recipes when the tab comes into focus
+  useFocusEffect(
+    useCallback(() => {
+      let isActive = true;
+      const fetchRecipes = async () => {
+        setIsLoadingRecipes(true);
+        try {
+          const response = await getMyRecipes();
+          if (isActive) {
+            const rawList = (response as any).myRecipes || response;
+            const mappedList: Recipe[] = rawList.map((dto: any) => ({
+              id: String(dto.recipeId),
+              title: dto.recipeName,
+              time: dto.cookingTime || "15분", // Provide fallback if missing
+              difficulty: mapDifficulty(dto.difficulty),
+              kcal: dto.calories || "적당량 kcal",
+              description: dto.description,
+              method: dto.cookingMethod,
+              ingredients: dto.requiredIngredients ? dto.requiredIngredients.map((i: any) => i.name) : [],
+              steps: dto.instructions || [],
+              matchCount: dto.requiredIngredients ? dto.requiredIngredients.length : 0,
+              totalCount: dto.requiredIngredients ? dto.requiredIngredients.length : 0,
+            }));
+            setMyRecipes(mappedList);
+          }
+        } catch (error) {
+          showToast("레시피 목록을 불러오지 못했어요.");
+        } finally {
+          if (isActive) {
+            setIsLoadingRecipes(false);
+          }
+        }
+      };
+
+      fetchRecipes();
+
+      return () => {
+        isActive = false;
+      };
+      // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [])
+  );
+
   // Register in-app notification when recommendation completes
   useEffect(() => {
     onComplete(() => {
@@ -86,9 +145,19 @@ export default function RecipeScreen() {
     });
     return () => onComplete(null);
   }, [onComplete, showNotification, markSwiping, router]);
-  const [selectedChip, setSelectedChip] = useState(RECIPE_FILTERS[0]);
-  const [searchQuery, setSearchQuery] = useState("");
-  const hasRecipes = MOCK_RECIPES.length > 0;
+
+  const filteredRecipes = useMemo(() => {
+    return myRecipes.filter((recipe) => {
+      const matchesSearch = recipe.title
+        .toLowerCase()
+        .includes(searchQuery.toLowerCase());
+      const matchesCategory =
+        selectedCategory === "전체" || recipe.method === selectedCategory;
+      return matchesSearch && matchesCategory;
+    });
+  }, [myRecipes, searchQuery, selectedCategory]);
+
+  const hasRecipes = filteredRecipes.length > 0;
 
   const handleRecommendPress = () => {
     if (status === "idle" || status === "error") {
@@ -157,12 +226,12 @@ export default function RecipeScreen() {
         contentContainerStyle={styles.chipsContent}
         style={styles.chipsScroll}
       >
-        {RECIPE_FILTERS.map((chip) => {
-          const isSelected = selectedChip === chip;
+        {categories.map((chip) => {
+          const isSelected = selectedCategory === chip;
           return (
             <Pressable
               key={chip}
-              onPress={() => setSelectedChip(chip)}
+              onPress={() => setSelectedCategory(chip)}
               style={[styles.chip, isSelected && styles.chipSelected]}
             >
               <Text
@@ -222,13 +291,17 @@ export default function RecipeScreen() {
       </View>
 
       {/* ── Content ── */}
-      {hasRecipes ? (
+      {isLoadingRecipes ? (
+        <View style={styles.emptyContainer}>
+          <ActivityIndicator size="large" color={Colors.primary} />
+        </View>
+      ) : hasRecipes ? (
         <ScrollView
           showsVerticalScrollIndicator={false}
           contentContainerStyle={styles.listContent}
           keyboardShouldPersistTaps="handled"
         >
-          {MOCK_RECIPES.map((recipe) => (
+          {filteredRecipes.map((recipe) => (
             <RecipeCard key={recipe.id} item={recipe} />
           ))}
         </ScrollView>
@@ -240,7 +313,9 @@ export default function RecipeScreen() {
             color={Colors.outlineVariant}
           />
           <Text style={styles.emptyText}>
-            위에 레시피 추천을{"\n"}눌러서 시작해 보세요!
+            {myRecipes.length > 0
+              ? "검색 결과가 없어요."
+              : "위에 레시피 추천을\n눌러서 시작해 보세요!"}
           </Text>
         </View>
       )}
@@ -406,6 +481,11 @@ const styles = StyleSheet.create({
     fontWeight: FontWeight.bold,
     color: Colors.onSurface,
     letterSpacing: LetterSpacing.tight,
+  },
+  cardDescription: {
+    fontSize: FontSize.bodyMd,
+    color: Colors.onSurfaceVariant,
+    lineHeight: 20,
   },
   matchText: {
     flexShrink: 0,

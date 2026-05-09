@@ -8,6 +8,7 @@ import { ToastProvider } from "@/components/Toast";
 import { RecipeRecommendationProvider } from "@/context/RecipeRecommendationContext";
 import { AuthProvider, useAuth } from "@/context/AuthContext";
 import { Colors } from "@/constants/theme";
+import { registerForPushNotificationsAsync } from "@/services/pushNotifications";
 
 // ─── Routing guard ────────────────────────────────────────────────────────────
 // Mounted under <AuthProvider> so it can react to auth state changes
@@ -48,6 +49,16 @@ function AuthGate({ children }: { children: React.ReactNode }) {
 }
 
 export default function RootLayout() {
+  // One-shot push-token registration on app boot. Server upload comes later;
+  // for now we just log so we can verify the issuance pipeline end-to-end.
+  useEffect(() => {
+    registerForPushNotificationsAsync().then((token) => {
+      if (token) {
+        console.log("🔔 Expo Push Token:", token);
+      }
+    });
+  }, []);
+
   return (
     <GestureHandlerRootView style={{ flex: 1 }}>
       <AuthProvider>

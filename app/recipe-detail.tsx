@@ -1,4 +1,4 @@
-import { useState, useMemo, useRef, useCallback } from "react";
+import { useState, useMemo, useRef, useCallback, useEffect } from "react";
 import {
   View,
   Text,
@@ -8,6 +8,7 @@ import {
   Modal,
   Animated,
   StyleSheet,
+  ActivityIndicator,
 } from "react-native";
 import { useRouter, useLocalSearchParams } from "expo-router";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
@@ -22,18 +23,39 @@ import {
   LetterSpacing,
 } from "@/constants/theme";
 import type {
-  RecipeDetail,
-  RecipeIngredient,
   IngredientDraft,
 } from "@/constants/domain";
-import { MOCK_RECIPE_DETAILS } from "@/mocks";
+import { getRecipeDetail, mapDifficulty, type RecipeDetailDto, type RecipeIngredientDto } from "@/services/recipes";
 import { IngredientEditCard } from "@/components/IngredientEditCard";
 import { useToast } from "@/components/Toast";
+import { ErrorScreen } from "@/components/ErrorScreen";
+
+export interface MappedRecipeDetail extends RecipeDetailDto {
+  name: string;
+  ingredients: RecipeIngredientDto[];
+  steps: string[];
+  time: string;
+}
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
-function formatAmount(amount: number): string {
-  return amount % 1 === 0 ? String(amount) : amount.toFixed(1);
+function parseAmount(amountStr: string): { num: number; unit: string } {
+  const match = amountStr.match(/^([\d.]+)(.*)$/);
+  if (match) {
+    return { num: parseFloat(match[1]), unit: match[2].trim() };
+  }
+  return { num: 1, unit: amountStr }; // Fallback
+}
+
+function formatAmount(amountStr: string, portions: number): string {
+  if (portions === 1) return amountStr;
+  
+  const parsed = parseAmount(amountStr);
+  if (isNaN(parsed.num)) return amountStr; // If it's just "적당량", return as is
+
+  const scaled = parsed.num * portions;
+  const scaledStr = scaled % 1 === 0 ? String(scaled) : scaled.toFixed(1);
+  return `${scaledStr}${parsed.unit}`;
 }
 
 // ─── Sub-components ───────────────────────────────────────────────────────────
@@ -78,10 +100,9 @@ function OwnedRow({
   item,
   portions,
 }: {
-  item: RecipeIngredient;
+  item: RecipeIngredientDto;
   portions: number;
 }) {
-  const scaled = item.amount * portions;
   return (
     <View style={styles.ingredientRow}>
       <View style={styles.ingredientLeft}>
@@ -93,8 +114,7 @@ function OwnedRow({
         <Text style={styles.ingredientName}>{item.name}</Text>
       </View>
       <Text style={styles.ingredientAmount}>
-        {formatAmount(scaled)}
-        {item.unit}
+        {formatAmount(item.amount, portions)}
       </Text>
     </View>
   );
@@ -107,12 +127,10 @@ function MissingRow({
   portions,
   onAddToFridge,
 }: {
-  item: RecipeIngredient;
+  item: RecipeIngredientDto;
   portions: number;
   onAddToFridge: () => void;
 }) {
-  const scaled = item.amount * portions;
-
   const handleBuy = () => {
     const url = `https://m.coupang.com/nm/search?q=${encodeURIComponent(item.name)}`;
     Linking.openURL(url);
@@ -128,8 +146,7 @@ function MissingRow({
       </View>
       <View style={styles.actionBtns}>
         <Text style={styles.ingredientAmountMissing}>
-          {formatAmount(scaled)}
-          {item.unit}
+          {formatAmount(item.amount, portions)}
         </Text>
         <Pressable
           onPress={handleBuy}
@@ -161,14 +178,21 @@ function MissingRow({
 function StepRow({
   order,
   instruction,
-  timerSeconds,
   isLast,
 }: {
   order: number;
   instruction: string;
-  timerSeconds?: number;
   isLast: boolean;
 }) {
+  // Simplistic timer extraction for demo, real implementation uses useTimer hook in cooking-step
+  const timeMatch = instruction.match(/(\d+)(분|초)/);
+  let timerSeconds: number | undefined;
+  
+  if (timeMatch) {
+    const val = parseInt(timeMatch[1], 10);
+    timerSeconds = timeMatch[2] === "분" ? val * 60 : val;
+  }
+
   const timerLabel = timerSeconds
     ? timerSeconds >= 60
       ? `${Math.floor(timerSeconds / 60)}분`
@@ -211,10 +235,37 @@ export default function RecipeDetailScreen() {
   const { showToast } = useToast();
   const { id } = useLocalSearchParams<{ id: string }>();
 
-  const recipe = useMemo(
-    () => MOCK_RECIPE_DETAILS.find((r) => r.id === id) ?? MOCK_RECIPE_DETAILS[0],
-    [id],
-  );
+  const [recipe, setRecipe] = useState<MappedRecipeDetail | null>(null);
+  const [isLoading, setIsLoading] = useState(true);
+  const [isError, setIsError] = useState(false);
+
+  useEffect(() => {
+    const fetchRecipeDetail = async () => {
+      if (!id) return;
+      setIsLoading(true);
+      setIsError(false);
+      try {
+        const data = await getRecipeDetail(Number(id));
+        // Map backend DTO to the expected frontend shape
+        const mappedRecipe = {
+          ...data,
+          name: data.recipeName,
+          ingredients: data.requiredIngredients || [],
+          steps: data.instructions || [],
+          difficulty: mapDifficulty(data.difficulty),
+          time: data.cookingTime || "15분",
+        };
+        setRecipe(mappedRecipe as any); // using as any to keep existing component logic working for now
+      } catch (error) {
+        showToast("레시피 정보를 불러오지 못했어요.");
+        setIsError(true);
+      } finally {
+        setIsLoading(false);
+      }
+    };
+
+    fetchRecipeDetail();
+  }, [id, showToast]);
 
   const [portions, setPortions] = useState(1);
   const [isSaved, setIsSaved] = useState(true);
@@ -290,8 +341,30 @@ export default function RecipeDetailScreen() {
     });
   };
 
-  const owned = recipe.ingredients.filter((i) => i.owned);
-  const missing = recipe.ingredients.filter((i) => !i.owned);
+  if (isError) {
+    return (
+      <ErrorScreen
+        message="레시피 정보를 불러오지 못했어요"
+        subMessage="일시적인 오류일 수 있으니 잠시 후 다시 시도해주세요."
+        buttonLabel="이전으로 돌아가기"
+        onPressHome={() => router.back()}
+      />
+    );
+  }
+
+  if (isLoading || !recipe) {
+    return (
+      <View style={[styles.screen, styles.centered, { paddingTop: insets.top }]}>
+        <ActivityIndicator size="large" color={Colors.primary} />
+      </View>
+    );
+  }
+
+  const owned = (recipe?.ingredients || []).filter((i) => i.isOwned !== false); // Default to owned if undefined
+  const missing = (recipe?.ingredients || []).filter((i) => i.isOwned === false);
+
+  const totalIngredients = (recipe?.ingredients || []).length;
+  const matchCount = owned.length;
 
   return (
     <View style={[styles.screen, { paddingTop: insets.top }]}>
@@ -330,7 +403,7 @@ export default function RecipeDetailScreen() {
       >
         {/* ── Hero ── */}
         <View style={styles.hero}>
-          <Text style={styles.heroTitle}>{recipe.title}</Text>
+          <Text style={styles.heroTitle}>{recipe.name}</Text>
         </View>
 
         {/* ── Meta Chips ── */}
@@ -338,21 +411,22 @@ export default function RecipeDetailScreen() {
           <View style={styles.metaChip}>
             <Ionicons name="nutrition-outline" size={15} color={Colors.primary} />
             <Text style={styles.metaChipHighlight}>
-              {recipe.matchCount}/{recipe.totalCount}
+              {matchCount}/{totalIngredients}
             </Text>
             <Text style={styles.metaChipLabel}>보유</Text>
           </View>
+          {/* Mock values for generic metadata since backend only gives name/desc currently */}
           <View style={styles.metaChip}>
             <Ionicons name="flame-outline" size={15} color={Colors.outline} />
-            <Text style={styles.metaChipText}>{recipe.kcal}</Text>
+            <Text style={styles.metaChipText}>적당량 kcal</Text>
           </View>
           <View style={styles.metaChip}>
             <Ionicons name="speedometer-outline" size={15} color={Colors.outline} />
-            <Text style={styles.metaChipText}>{recipe.difficulty}</Text>
+            <Text style={styles.metaChipText}>{(recipe as any).difficulty || "초급"}</Text>
           </View>
           <View style={styles.metaChip}>
             <Ionicons name="time-outline" size={15} color={Colors.outline} />
-            <Text style={styles.metaChipText}>{recipe.time}</Text>
+            <Text style={styles.metaChipText}>{(recipe as any).time || "15분"}</Text>
           </View>
         </View>
 
@@ -390,10 +464,9 @@ export default function RecipeDetailScreen() {
           <Text style={styles.sectionTitle}>조리 순서</Text>
           {recipe.steps.map((step, idx) => (
             <StepRow
-              key={step.order}
-              order={step.order}
-              instruction={step.instruction}
-              timerSeconds={step.timerSeconds}
+              key={idx}
+              order={idx + 1}
+              instruction={step}
               isLast={idx === recipe.steps.length - 1}
             />
           ))}
@@ -411,7 +484,7 @@ export default function RecipeDetailScreen() {
           onPress={() =>
             router.push({
               pathname: "/cooking-ready",
-              params: { id: recipe.id },
+              params: { id: recipe.recipeId },
             } as never)
           }
           style={({ pressed }) => [
@@ -425,7 +498,7 @@ export default function RecipeDetailScreen() {
           onPress={() =>
             router.push({
               pathname: "/cooking-complete",
-              params: { id: recipe.id },
+              params: { id: recipe.recipeId },
             } as never)
           }
           style={({ pressed }) => [
@@ -515,6 +588,10 @@ const styles = StyleSheet.create({
   screen: {
     flex: 1,
     backgroundColor: Colors.surface,
+  },
+  centered: {
+    justifyContent: "center",
+    alignItems: "center",
   },
 
   // Header
