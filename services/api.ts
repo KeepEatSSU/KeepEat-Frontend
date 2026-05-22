@@ -111,13 +111,27 @@ function logResponse(response: AxiosResponse): void {
 function logError(error: AxiosError): void {
   if (!__DEV__) return;
   const path = pathOf(error.config);
+  const method = (error.config?.method ?? "GET").toUpperCase();
   if (error.response) {
+    // Server replied with a status (4xx/5xx) — surface its body verbatim so
+    // backend error envelopes like { code, message, status } are visible.
     console.log(
-      `[API ERR] ${error.response.status} ${path}`,
+      `[API ERR] ${error.response.status} ${method} ${path}`,
       parseBody(error.response.data),
     );
   } else {
-    console.log(`[API ERR] NETWORK ${path}`, error.message);
+    // No response reached us. The body the user sees in Swagger isn't here
+    // because the request never completed end-to-end. Dump transport-level
+    // hints (axios error code, full URL, HTTP message) so we can tell ATS/
+    // cleartext blocks apart from timeouts and DNS failures.
+    const fullUrl = error.config?.baseURL
+      ? `${error.config.baseURL}${error.config?.url ?? ""}`
+      : (error.config?.url ?? "?");
+    console.log(`[API ERR] NETWORK ${method} ${path}`, {
+      code: error.code ?? "?",
+      message: error.message,
+      url: fullUrl,
+    });
   }
 }
 
@@ -273,13 +287,48 @@ export async function login(
   return data;
 }
 
+/**
+ * Sends an email verification code to the given address. Server returns a
+ * plain string message; we only care about success vs failure.
+ *
+ * Public endpoint — no auth header needed. The 401 interceptor still gates
+ * by URL whitelist (refresh/login), so a 401 from this endpoint propagates
+ * up as a regular error (which is the current backend behavior while the
+ * public-route permission is being rolled out).
+ */
+export async function sendEmailCode(
+  email: string,
+  config?: AxiosRequestConfig,
+): Promise<void> {
+  await api.post(AUTH_ENDPOINTS.emailSend, { email }, config);
+}
+
+/**
+ * Verifies an email code. Server returns a plain string message. Throws on
+ * mismatch / expired / network failure — caller distinguishes via error.
+ * Successful verification leaves the email marked as verified server-side;
+ * the subsequent signup call doesn't need to carry the code again.
+ */
+export async function verifyEmailCode(
+  email: string,
+  code: string,
+  config?: AxiosRequestConfig,
+): Promise<void> {
+  await api.post(AUTH_ENDPOINTS.emailVerify, { email, code }, config);
+}
+
 /** Creates a new account. Server returns a plain string message; we don't surface it. */
 export async function signUp(
   email: string,
   password: string,
+  nickname: string,
   config?: AxiosRequestConfig,
 ): Promise<void> {
-  await api.post("/api/users/signup", { email, password }, config);
+  await api.post(
+    "/api/users/signup",
+    { nickname, email, password },
+    config,
+  );
 }
 
 /** Fetches the current user. Used on app boot to validate stored tokens. */

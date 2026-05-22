@@ -40,8 +40,22 @@ export interface IngredientDraft {
   nickname: string;
   quantity: number | null;
   unit: Unit;
-  storage: StorageType;
+  /** Null = 미선택. Forced explicit pick before submit. */
+  storage: StorageType | null;
   expirationDate: Date | null;
+  /**
+   * 사용자가 만료일을 직접 수정했는지. true면 보관 변경 시 만료일이 마스터
+   * 평균으로 자동 갱신되지 않음. 새 마스터를 picker로 선택하면 false로 리셋.
+   */
+  expirationManuallySet?: boolean;
+  /** 사용자가 마스터 DB 외에 직접 등록한 "내 재료" 여부. 레시피 추천에 사용 안 됨. */
+  isCustom?: boolean;
+  /** isCustom ON 시 ingredientId 백업. OFF 시 복원에 사용. UI에 노출되지 않는 내부 필드. */
+  _backupIngredientId?: number;
+  /** isCustom ON 시 nickname 백업. OFF 시 복원에 사용. */
+  _backupNickname?: string;
+  /** isCustom ON 시 name 백업. OFF 시 이름이 변경됐는지 판단해 ingredientId 복원 여부 결정. */
+  _backupName?: string;
 }
 
 export interface Recipe {
@@ -87,6 +101,24 @@ export interface ManagementTip {
   title: string;
   body: string;
   highlight: string;
+}
+
+// ─── In-app notifications ─────────────────────────────────────────────────────
+
+export type NotificationType =
+  | "notice"
+  | "expiry_soon"
+  | "weekly_cheer"
+  | "recipe_ready";
+
+export interface AppNotification {
+  id: number;
+  type: NotificationType;
+  title: string;
+  body: string;
+  isRead: boolean;
+  /** ISO 8601 timestamp (e.g. "2026-05-10T09:30:00Z"). */
+  createdAt: string;
 }
 
 // ─── Shared Constants ─────────────────────────────────────────────────────────

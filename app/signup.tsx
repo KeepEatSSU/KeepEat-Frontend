@@ -1,32 +1,33 @@
-import { useState, useRef } from "react";
-import {
-  View,
-  Text,
-  TextInput,
-  Pressable,
-  KeyboardAvoidingView,
-  Platform,
-  Keyboard,
-  TouchableWithoutFeedback,
-  ScrollView,
-  ActivityIndicator,
-  StyleSheet,
-} from "react-native";
-import { useRouter } from "expo-router";
-import { useSafeAreaInsets } from "react-native-safe-area-context";
-import { Ionicons } from "@expo/vector-icons";
-import { isAxiosError } from "axios";
 import { useToast } from "@/components/Toast";
-import { useAuth } from "@/context/AuthContext";
 import {
   Colors,
-  Spacing,
   FontSize,
   FontWeight,
+  LetterSpacing,
   Radius,
   Shadows,
-  LetterSpacing,
+  Spacing,
 } from "@/constants/theme";
+import { useAuth } from "@/context/AuthContext";
+import { sendEmailCode, verifyEmailCode } from "@/services/api";
+import { Ionicons } from "@expo/vector-icons";
+import { isAxiosError } from "axios";
+import { useRouter } from "expo-router";
+import { useRef, useState } from "react";
+import {
+  ActivityIndicator,
+  Keyboard,
+  KeyboardAvoidingView,
+  Platform,
+  Pressable,
+  ScrollView,
+  StyleSheet,
+  Text,
+  TextInput,
+  TouchableWithoutFeedback,
+  View,
+} from "react-native";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 // ─── Validation ───────────────────────────────────────────────────────────────
 
@@ -43,8 +44,9 @@ export default function SignupScreen() {
   const { showToast } = useToast();
   const { signUp } = useAuth();
 
-  const emailRef = useRef<TextInput>(null);
   const passwordRef = useRef<TextInput>(null);
+
+  const [step, setStep] = useState<1 | 2>(1);
 
   const [nickname, setNickname] = useState("");
   const [email, setEmail] = useState("");
@@ -53,13 +55,76 @@ export default function SignupScreen() {
   const [submitting, setSubmitting] = useState(false);
   const [submitError, setSubmitError] = useState("");
 
+  // Step-1 email verification state. Real send/verify endpoints are wired
+  // below; backend currently 401s on send while the public-route permission
+  // is being rolled out. A __DEV__-only "123456" fallback inside the verify
+  // handler keeps the UI flow testable until that lands — remove the fallback
+  // once 200 responses come back.
+  const [codeSent, setCodeSent] = useState(false);
+  const [verifyCode, setVerifyCode] = useState("");
+  const [verifyError, setVerifyError] = useState("");
+  const [sending, setSending] = useState(false);
+  const [verifying, setVerifying] = useState(false);
+
+  // Auto-focus removed: programmatic .focus() on iOS can leave the input in
+  // a "focused but no keyboard" state, which then traps subsequent taps on
+  // other inputs. Users tap each field themselves — slightly less convenient
+  // but reliably works on both platforms.
+
   // Validation
   const isEmailValid = EMAIL_REGEX.test(email);
   const isPwLengthOk = PW_LENGTH_REGEX.test(password);
   const isPwComplexOk = PW_COMPLEXITY_REGEX.test(password);
   const isNicknameValid = nickname.trim().length > 0;
   const canSubmit =
-    isNicknameValid && isEmailValid && isPwLengthOk && isPwComplexOk && !submitting;
+    isNicknameValid && isPwLengthOk && isPwComplexOk && !submitting;
+
+  const handleSendCode = async () => {
+    if (!isEmailValid || sending) return;
+    Keyboard.dismiss();
+    setSending(true);
+    setVerifyError("");
+    try {
+      await sendEmailCode(email.trim());
+      setCodeSent(true);
+      setVerifyCode("");
+      showToast("인증번호를 전송했어요");
+    } catch {
+      // Logger already prints the server body / network code; the user-facing
+      // message stays generic.
+      setVerifyError("인증번호 전송에 실패했어요. 잠시 후 다시 시도해주세요");
+    } finally {
+      setSending(false);
+    }
+  };
+
+  const handleCodeChange = async (next: string) => {
+    // number-pad only allows digits but be defensive in case keyboard variants
+    // emit other chars.
+    const digits = next.replace(/\D/g, "").slice(0, 6);
+    setVerifyCode(digits);
+    setVerifyError("");
+    if (digits.length < 6 || verifying) return;
+
+    // 백엔드 401 해결 전 임시 폴백: __DEV__ + "123456"이면 verify API 건너뛰고
+    // step 2 진입. 백엔드 권한 풀리면 이 블록 제거.
+    if (__DEV__ && digits === "123456") {
+      Keyboard.dismiss();
+      setStep(2);
+      return;
+    }
+
+    setVerifying(true);
+    try {
+      await verifyEmailCode(email.trim(), digits);
+      Keyboard.dismiss();
+      setStep(2);
+    } catch {
+      setVerifyError("인증번호가 일치하지 않아요");
+    } finally {
+      setVerifying(false);
+    }
+  };
 
   const handleSignup = async () => {
     if (!canSubmit) return;
@@ -67,7 +132,7 @@ export default function SignupScreen() {
     setSubmitError("");
     setSubmitting(true);
     try {
-      await signUp(email.trim(), password);
+      await signUp(email.trim(), password, nickname.trim());
       showToast("회원가입이 완료되었습니다!");
       router.replace("/(tabs)");
     } catch (e) {
@@ -111,179 +176,305 @@ export default function SignupScreen() {
           <View style={styles.hero}>
             <Text style={styles.heroTitle}>회원가입</Text>
             <Text style={styles.heroSubtitle}>
-              KeepEat과 함께 시작하세요
+              {step === 1
+                ? "이메일을 인증해주세요"
+                : "KeepEat과 함께 시작하세요"}
             </Text>
           </View>
 
           {/* Form */}
           <View style={styles.formCard}>
-            {/* Nickname */}
-            <View style={styles.inputWrap}>
-              <Text style={styles.inputLabel}>닉네임</Text>
-              <View style={styles.inputRow}>
-                <Ionicons
-                  name="happy-outline"
-                  size={18}
-                  color={Colors.outline}
-                  style={{ marginRight: Spacing.sm }}
-                />
-                <TextInput
-                  value={nickname}
-                  onChangeText={setNickname}
-                  placeholder="어떻게 불러드릴까요?"
-                  placeholderTextColor={Colors.outline}
-                  style={styles.input}
-                  returnKeyType="next"
-                  onSubmitEditing={() => emailRef.current?.focus()}
-                />
-              </View>
-            </View>
+            {step === 1 ? (
+              <>
+                {/* Email */}
+                <View style={styles.inputWrap}>
+                  <Text style={styles.inputLabel}>이메일</Text>
+                  <View
+                    style={[
+                      styles.inputRow,
+                      email.length > 0 &&
+                        !isEmailValid &&
+                        styles.inputRowError,
+                    ]}
+                  >
+                    <Ionicons
+                      name="mail-outline"
+                      size={18}
+                      color={Colors.outline}
+                      style={{ marginRight: Spacing.sm }}
+                    />
+                    <TextInput
+                      value={email}
+                      onChangeText={(v) => {
+                        setEmail(v);
+                        // Editing the email after sending invalidates the code.
+                        if (codeSent) {
+                          setCodeSent(false);
+                          setVerifyCode("");
+                          setVerifyError("");
+                        }
+                      }}
+                      placeholder="example@email.com"
+                      placeholderTextColor={Colors.outline}
+                      style={styles.input}
+                      keyboardType="email-address"
+                      autoCapitalize="none"
+                      autoCorrect={false}
+                      returnKeyType="done"
+                    />
+                    {email.length > 0 && isEmailValid && (
+                      <Ionicons
+                        name="checkmark-circle"
+                        size={18}
+                        color={Colors.primary}
+                      />
+                    )}
+                  </View>
+                  {email.length > 0 && !isEmailValid && (
+                    <Text style={styles.fieldError}>
+                      올바른 이메일 형식을 입력하세요
+                    </Text>
+                  )}
+                </View>
 
-            {/* Email */}
-            <View style={styles.inputWrap}>
-              <Text style={styles.inputLabel}>이메일</Text>
-              <View
-                style={[
-                  styles.inputRow,
-                  email.length > 0 &&
-                    !isEmailValid &&
-                    styles.inputRowError,
-                ]}
-              >
-                <Ionicons
-                  name="mail-outline"
-                  size={18}
-                  color={Colors.outline}
-                  style={{ marginRight: Spacing.sm }}
-                />
-                <TextInput
-                  ref={emailRef}
-                  value={email}
-                  onChangeText={setEmail}
-                  placeholder="example@email.com"
-                  placeholderTextColor={Colors.outline}
-                  style={styles.input}
-                  keyboardType="email-address"
-                  autoCapitalize="none"
-                  autoCorrect={false}
-                  returnKeyType="next"
-                  onSubmitEditing={() => passwordRef.current?.focus()}
-                />
-                {email.length > 0 && isEmailValid && (
-                  <Ionicons
-                    name="checkmark-circle"
-                    size={18}
-                    color={Colors.primary}
-                  />
+                {/* Send code button — visible until first send, then replaced
+                    by the code input + resend link below. */}
+                {!codeSent && (
+                  <Pressable
+                    onPress={handleSendCode}
+                    disabled={!isEmailValid || sending}
+                    style={({ pressed }) => [
+                      styles.primaryBtn,
+                      (!isEmailValid || sending) && styles.primaryBtnDisabled,
+                      isEmailValid &&
+                        !sending &&
+                        pressed && {
+                          opacity: 0.85,
+                          transform: [{ scale: 0.98 }],
+                        },
+                    ]}
+                  >
+                    {sending ? (
+                      <ActivityIndicator color={Colors.onPrimary} />
+                    ) : (
+                      <Text
+                        style={[
+                          styles.primaryBtnText,
+                          !isEmailValid && styles.primaryBtnTextDisabled,
+                        ]}
+                      >
+                        인증번호 전송
+                      </Text>
+                    )}
+                  </Pressable>
                 )}
-              </View>
-              {email.length > 0 && !isEmailValid && (
-                <Text style={styles.fieldError}>올바른 이메일 형식을 입력하세요</Text>
-              )}
-            </View>
 
-            {/* Password */}
-            <View style={styles.inputWrap}>
-              <Text style={styles.inputLabel}>비밀번호</Text>
-              <View style={styles.inputRow}>
-                <Ionicons
-                  name="lock-closed-outline"
-                  size={18}
-                  color={Colors.outline}
-                  style={{ marginRight: Spacing.sm }}
-                />
-                <TextInput
-                  ref={passwordRef}
-                  value={password}
-                  onChangeText={setPassword}
-                  placeholder="비밀번호"
-                  placeholderTextColor={Colors.outline}
-                  style={styles.input}
-                  secureTextEntry={!showPassword}
-                  returnKeyType="done"
-                  onSubmitEditing={handleSignup}
-                />
-                <Pressable onPress={() => setShowPassword((v) => !v)}>
-                  <Ionicons
-                    name={showPassword ? "eye-off-outline" : "eye-outline"}
-                    size={18}
-                    color={Colors.outline}
-                  />
-                </Pressable>
-              </View>
+                {codeSent && (
+                  <View style={styles.inputWrap}>
+                    <Text style={styles.inputLabel}>인증번호</Text>
+                    <View
+                      style={[
+                        styles.inputRow,
+                        verifyError !== "" && styles.inputRowError,
+                      ]}
+                    >
+                      <Ionicons
+                        name="keypad-outline"
+                        size={18}
+                        color={Colors.outline}
+                        style={{ marginRight: Spacing.sm }}
+                      />
+                      <TextInput
+                        value={verifyCode}
+                        onChangeText={handleCodeChange}
+                        placeholder="6자리 숫자"
+                        placeholderTextColor={Colors.outline}
+                        style={styles.input}
+                        keyboardType="number-pad"
+                        maxLength={6}
+                      />
+                    </View>
+                    {verifyError !== "" && (
+                      <Text style={styles.fieldError}>{verifyError}</Text>
+                    )}
 
-              {/* Password checklist */}
-              <View style={styles.checkList}>
-                <View style={styles.checkItem}>
-                  <Ionicons
-                    name={isPwLengthOk ? "checkmark-circle" : "ellipse-outline"}
-                    size={16}
-                    color={isPwLengthOk ? Colors.primary : Colors.outline}
-                  />
-                  <Text
-                    style={[
-                      styles.checkText,
-                      isPwLengthOk && styles.checkTextPass,
-                    ]}
-                  >
-                    8자리 이상 16자리 미만
-                  </Text>
+                    <Pressable
+                      onPress={handleSendCode}
+                      disabled={sending}
+                      style={({ pressed }) => [
+                        styles.resendBtn,
+                        pressed && !sending && { opacity: 0.6 },
+                      ]}
+                    >
+                      <Text
+                        style={[
+                          styles.resendText,
+                          sending && { opacity: 0.5 },
+                        ]}
+                      >
+                        {sending ? "전송 중..." : "인증번호 재전송"}
+                      </Text>
+                    </Pressable>
+                  </View>
+                )}
+              </>
+            ) : (
+              <>
+                {/* Email (readonly — fixed after verification) */}
+                <View style={styles.inputWrap}>
+                  <Text style={styles.inputLabel}>이메일</Text>
+                  <View style={[styles.inputRow, styles.inputRowReadonly]}>
+                    <Ionicons
+                      name="mail-outline"
+                      size={18}
+                      color={Colors.outline}
+                      style={{ marginRight: Spacing.sm }}
+                    />
+                    <Text style={styles.readonlyText} numberOfLines={1}>
+                      {email}
+                    </Text>
+                    <Ionicons
+                      name="checkmark-circle"
+                      size={18}
+                      color={Colors.primary}
+                    />
+                  </View>
                 </View>
-                <View style={styles.checkItem}>
-                  <Ionicons
-                    name={
-                      isPwComplexOk ? "checkmark-circle" : "ellipse-outline"
-                    }
-                    size={16}
-                    color={isPwComplexOk ? Colors.primary : Colors.outline}
-                  />
-                  <Text
-                    style={[
-                      styles.checkText,
-                      isPwComplexOk && styles.checkTextPass,
-                    ]}
-                  >
-                    영문, 숫자, 특수기호 포함
-                  </Text>
+
+                {/* Nickname */}
+                <View style={styles.inputWrap}>
+                  <Text style={styles.inputLabel}>닉네임</Text>
+                  <View style={styles.inputRow}>
+                    <Ionicons
+                      name="happy-outline"
+                      size={18}
+                      color={Colors.outline}
+                      style={{ marginRight: Spacing.sm }}
+                    />
+                    <TextInput
+                      value={nickname}
+                      onChangeText={setNickname}
+                      placeholder="어떻게 불러드릴까요?"
+                      placeholderTextColor={Colors.outline}
+                      style={styles.input}
+                      returnKeyType="next"
+                      // onSubmitEditing={() => passwordRef.current?.focus()}
+                      blurOnSubmit={false}
+                    />
+                  </View>
                 </View>
-              </View>
-            </View>
 
-            {submitError !== "" && (
-              <View style={styles.submitErrorRow}>
-                <Ionicons
-                  name="alert-circle"
-                  size={14}
-                  color={Colors.error}
-                />
-                <Text style={styles.submitErrorText}>{submitError}</Text>
-              </View>
-            )}
+                {/* Password */}
+                <View style={styles.inputWrap}>
+                  <Text style={styles.inputLabel}>비밀번호</Text>
+                  <View style={styles.inputRow}>
+                    <Ionicons
+                      name="lock-closed-outline"
+                      size={18}
+                      color={Colors.outline}
+                      style={{ marginRight: Spacing.sm }}
+                    />
+                    <TextInput
+                      ref={passwordRef}
+                      value={password}
+                      onChangeText={setPassword}
+                      placeholder="비밀번호"
+                      placeholderTextColor={Colors.outline}
+                      style={styles.input}
+                      secureTextEntry={!showPassword}
+                      returnKeyType="done"
+                      onSubmitEditing={handleSignup}
+                    />
+                    <Pressable onPress={() => setShowPassword((v) => !v)}>
+                      <Ionicons
+                        name={showPassword ? "eye-off-outline" : "eye-outline"}
+                        size={18}
+                        color={Colors.outline}
+                      />
+                    </Pressable>
+                  </View>
 
-            {/* Signup button */}
-            <Pressable
-              onPress={handleSignup}
-              disabled={!canSubmit}
-              style={({ pressed }) => [
-                styles.primaryBtn,
-                !canSubmit && styles.primaryBtnDisabled,
-                canSubmit &&
-                  pressed && { opacity: 0.85, transform: [{ scale: 0.98 }] },
-              ]}
-            >
-              {submitting ? (
-                <ActivityIndicator color={Colors.onPrimary} />
-              ) : (
-                <Text
-                  style={[
-                    styles.primaryBtnText,
-                    !canSubmit && styles.primaryBtnTextDisabled,
+                  {/* Password checklist */}
+                  <View style={styles.checkList}>
+                    <View style={styles.checkItem}>
+                      <Ionicons
+                        name={
+                          isPwLengthOk ? "checkmark-circle" : "ellipse-outline"
+                        }
+                        size={16}
+                        color={isPwLengthOk ? Colors.primary : Colors.outline}
+                      />
+                      <Text
+                        style={[
+                          styles.checkText,
+                          isPwLengthOk && styles.checkTextPass,
+                        ]}
+                      >
+                        8자리 이상 16자리 미만
+                      </Text>
+                    </View>
+                    <View style={styles.checkItem}>
+                      <Ionicons
+                        name={
+                          isPwComplexOk
+                            ? "checkmark-circle"
+                            : "ellipse-outline"
+                        }
+                        size={16}
+                        color={isPwComplexOk ? Colors.primary : Colors.outline}
+                      />
+                      <Text
+                        style={[
+                          styles.checkText,
+                          isPwComplexOk && styles.checkTextPass,
+                        ]}
+                      >
+                        영문, 숫자, 특수기호 포함
+                      </Text>
+                    </View>
+                  </View>
+                </View>
+
+                {submitError !== "" && (
+                  <View style={styles.submitErrorRow}>
+                    <Ionicons
+                      name="alert-circle"
+                      size={14}
+                      color={Colors.error}
+                    />
+                    <Text style={styles.submitErrorText}>{submitError}</Text>
+                  </View>
+                )}
+
+                {/* Signup button */}
+                <Pressable
+                  onPress={handleSignup}
+                  disabled={!canSubmit}
+                  style={({ pressed }) => [
+                    styles.primaryBtn,
+                    !canSubmit && styles.primaryBtnDisabled,
+                    canSubmit &&
+                      pressed && {
+                        opacity: 0.85,
+                        transform: [{ scale: 0.98 }],
+                      },
                   ]}
                 >
-                  가입하기
-                </Text>
-              )}
-            </Pressable>
+                  {submitting ? (
+                    <ActivityIndicator color={Colors.onPrimary} />
+                  ) : (
+                    <Text
+                      style={[
+                        styles.primaryBtnText,
+                        !canSubmit && styles.primaryBtnTextDisabled,
+                      ]}
+                    >
+                      가입하기
+                    </Text>
+                  )}
+                </Pressable>
+              </>
+            )}
           </View>
 
           {/* Footer */}
@@ -367,6 +558,9 @@ const styles = StyleSheet.create({
   inputRowError: {
     backgroundColor: "rgba(186, 26, 26, 0.05)",
   },
+  inputRowReadonly: {
+    backgroundColor: Colors.surfaceContainerHigh,
+  },
   input: {
     flex: 1,
     fontSize: FontSize.bodyLg,
@@ -374,6 +568,12 @@ const styles = StyleSheet.create({
     color: Colors.onSurface,
     padding: 0,
     margin: 0,
+  },
+  readonlyText: {
+    flex: 1,
+    fontSize: FontSize.bodyLg,
+    fontWeight: FontWeight.medium,
+    color: Colors.onSurfaceVariant,
   },
   fieldError: {
     fontSize: FontSize.labelSm,
@@ -432,6 +632,18 @@ const styles = StyleSheet.create({
   },
   primaryBtnTextDisabled: {
     color: Colors.outline,
+  },
+
+  // Resend link (step 1)
+  resendBtn: {
+    alignSelf: "center",
+    paddingVertical: Spacing.xs,
+    marginTop: Spacing.sm,
+  },
+  resendText: {
+    fontSize: FontSize.bodySm,
+    fontWeight: FontWeight.semiBold,
+    color: Colors.primary,
   },
 
   // Footer

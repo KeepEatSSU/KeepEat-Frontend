@@ -1,5 +1,6 @@
 /**
- * D-Day calculation utility for expiration dates.
+ * D-Day calculation utility for expiration dates + relative-time formatter
+ * shared by the notification tray.
  */
 
 /** Format a Date as "YYYY-MM-DD" in local time (safe for react-native-calendars). */
@@ -80,4 +81,35 @@ export function getDDayInfo(
   }
 
   return { daysLeft, text, status };
+}
+
+/**
+ * Format an ISO timestamp as a Korean relative-time label.
+ *   < 1 minute  → "방금 전"
+ *   < 1 hour    → "N분 전"
+ *   < 24 hours  → "N시간 전"
+ *   < 7 days    → "N일 전"
+ *   otherwise   → "MM월 DD일"
+ *
+ * Future timestamps (or skewed clocks producing negative diffs) collapse
+ * to "방금 전" so the UI never shows a nonsensical "0분 전" or negative.
+ */
+export function formatRelativeTime(isoDate: string): string {
+  const target = new Date(isoDate);
+  const diffMs = Date.now() - target.getTime();
+
+  if (diffMs < 60_000) return "방금 전";
+
+  const minutes = Math.floor(diffMs / 60_000);
+  if (minutes < 60) return `${minutes}분 전`;
+
+  const hours = Math.floor(minutes / 60);
+  if (hours < 24) return `${hours}시간 전`;
+
+  const days = Math.floor(hours / 24);
+  if (days < 7) return `${days}일 전`;
+
+  const month = String(target.getMonth() + 1).padStart(2, "0");
+  const day = String(target.getDate()).padStart(2, "0");
+  return `${month}월 ${day}일`;
 }

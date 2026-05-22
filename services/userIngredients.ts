@@ -182,6 +182,11 @@ export function mapIngredientToCreateRequest(
       `IngredientDraft "${draft.name}" is missing ingredientId — pick a master ingredient before submitting`,
     );
   }
+  if (draft.storage == null) {
+    throw new Error(
+      `IngredientDraft "${draft.name}" is missing storage — pick a storage type before submitting`,
+    );
+  }
 
   const req: UserIngredientCreateRequest = {
     ingredientId: draft.ingredientId,

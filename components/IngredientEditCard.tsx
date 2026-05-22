@@ -1,4 +1,4 @@
-import { useRef, useMemo } from "react";
+import { useMemo, useState } from "react";
 import {
   View,
   Text,
@@ -10,11 +10,13 @@ import { Ionicons } from "@expo/vector-icons";
 import { ExpandableDatePicker } from "@/components/ExpandableDatePicker";
 import { CapacityInput } from "@/components/CapacityInput";
 import { QuickExpiryPicker } from "@/components/QuickExpiryPicker";
+import { InfoModal } from "@/components/InfoModal";
 import {
   Colors,
   Spacing,
   FontSize,
   FontWeight,
+  LetterSpacing,
   Radius,
 } from "@/constants/theme";
 import {
@@ -24,6 +26,7 @@ import {
   type StorageType,
 } from "@/constants/domain";
 import {
+  METRIC_TO_DAYS,
   STORAGE_OPTIONS_BY_INGREDIENT_ID,
   type ApiStorageType,
   type StorageOptionEntry,
@@ -61,20 +64,36 @@ export function IngredientEditCard({
   hideDelete = false,
 }: IngredientEditCardProps) {
   const hasError = item.quantity === null || item.quantity <= 0;
-  const isFrozen = item.storage === "frozen";
+  const [infoOpen, setInfoOpen] = useState(false);
   // OCR can return UNMATCHED items (rawName filled, no master link). The
-  // empty-name placeholder already covers the never-picked case; this badge
+  // empty-name placeholder already covers the never-picked case; this flag
   // covers the "name is filled but the picker step still needs to happen".
   const needsMatching = item.name !== "" && item.ingredientId == null;
-
-  // Remember last non-frozen expiration date
-  const lastNonFrozenDateRef = useRef<Date | null>(item.expirationDate);
+  // Unified "needs user action" signals — same visual language as the
+  // quantity field. Name box turns red for both empty and UNMATCHED, and
+  // the card-level tint fires for any unresolved input.
+  const nameNeedsAction =
+    !item.isCustom && (item.name === "" || needsMatching);
+  const cardNeedsAction = hasError || nameNeedsAction;
 
   // Master storage options for the currently picked ingredient (if any).
   const masterOptions = useMemo<StorageOptionEntry[] | undefined>(() => {
     if (item.ingredientId == null) return undefined;
     return STORAGE_OPTIONS_BY_INGREDIENT_ID.get(item.ingredientId);
   }, [item.ingredientId]);
+
+  // Whether the quick-expiry chips will actually render. Mirrors
+  // QuickExpiryPicker's internal `match` check so we can decide whether to
+  // wrap the date area in a group container before the picker renders.
+  const hasQuickExpiry = useMemo(() => {
+    const { isCustom, ingredientId, storage } = item;
+    if (isCustom) return false;
+    if (ingredientId == null || storage == null) return false;
+    const opts = STORAGE_OPTIONS_BY_INGREDIENT_ID.get(ingredientId);
+    if (!opts) return false;
+    const apiStorage = STORAGE_DOMAIN_TO_API[storage];
+    return opts.some((o) => o.storageType === apiStorage);
+  }, [item.isCustom, item.ingredientId, item.storage]);
 
   const storageHasOption = (storage: StorageType): boolean => {
     if (!masterOptions) return true; // unknown master → don't restrict
@@ -85,21 +104,34 @@ export function IngredientEditCard({
 
   const handleStorageChange = (newStorage: StorageType) => {
     if (newStorage === item.storage) return;
-    if (newStorage === "frozen" && item.storage !== "frozen") {
-      lastNonFrozenDateRef.current = item.expirationDate;
-      onUpdate({ storage: newStorage, expirationDate: null });
-    } else if (newStorage !== "frozen" && item.storage === "frozen") {
-      const restored =
-        lastNonFrozenDateRef.current ??
-        (() => {
-          const d = new Date();
-          d.setDate(d.getDate() + 7);
-          return d;
-        })();
-      onUpdate({ storage: newStorage, expirationDate: restored });
-    } else {
-      onUpdate({ storage: newStorage });
-    }
+
+    // Master-avg auto-expiry for the new storage. Skipped when the user
+    // already edited the date by hand (preserve their intent) or no master
+    // option is available. Frozen is treated like any other storage now —
+    // it has its own (min, max) window in the master data.
+    const autoExpiry = (() => {
+      if (item.expirationManuallySet) return undefined;
+      if (item.ingredientId == null) return undefined;
+      const options = STORAGE_OPTIONS_BY_INGREDIENT_ID.get(item.ingredientId);
+      if (!options) return undefined;
+      const opt = options.find(
+        (o) => o.storageType === STORAGE_DOMAIN_TO_API[newStorage],
+      );
+      if (!opt) return undefined;
+      const avgDays = Math.max(
+        1,
+        Math.round(((opt.min + opt.max) / 2) * METRIC_TO_DAYS[opt.metric]),
+      );
+      const anchor = purchaseDate ?? new Date();
+      const d = new Date(anchor);
+      d.setDate(d.getDate() + avgDays);
+      return d;
+    })();
+
+    onUpdate({
+      storage: newStorage,
+      ...(autoExpiry ? { expirationDate: autoExpiry } : {}),
+    });
   };
 
   const cycleUnit = () => {
@@ -108,44 +140,81 @@ export function IngredientEditCard({
   };
 
   return (
-    <View style={[styles.card, hasError && styles.cardError]}>
-      {/* Header: tappable name (required) + delete */}
-      <View style={styles.cardHeader}>
-        <Pressable
-          onPress={onCategoryPress}
-          disabled={!onCategoryPress}
-          style={({ pressed }) => [
-            styles.cardNameBtn,
-            item.name === "" && styles.cardNameBtnEmpty,
-            pressed && onCategoryPress && { opacity: 0.6 },
-          ]}
-        >
-          <Text
-            style={[
-              styles.cardName,
-              item.name === "" && styles.cardNamePlaceholder,
-            ]}
-          >
-            {item.name || "식재료 선택 (필수)"}
-          </Text>
-          {needsMatching && (
-            <View style={styles.matchBadge}>
-              <Text style={styles.matchBadgeText}>매칭 필요</Text>
-            </View>
-          )}
-          {onCategoryPress && (
-            <Ionicons
-              name="chevron-down"
-              size={16}
-              color={
-                item.name === "" || needsMatching
-                  ? Colors.error
-                  : Colors.outline
+    <>
+    <View style={[styles.card, cardNeedsAction && styles.cardError]}>
+      {/* Top row: "내 재료" toggle + info + delete (moved here from cardHeader) */}
+      <View style={styles.topRow}>
+        <View style={styles.toggleGroup}>
+          <Pressable
+            onPress={() => {
+              const next = !item.isCustom;
+              if (next) {
+                // ON: back up current master link + nickname + name so OFF can
+                // restore them. Custom name lives in `name` while toggled on.
+                onUpdate({
+                  isCustom: true,
+                  _backupIngredientId: item.ingredientId,
+                  _backupNickname: item.nickname,
+                  _backupName: item.name,
+                  ingredientId: undefined,
+                  nickname: "",
+                });
+              } else {
+                // OFF: restore backup only if name is unchanged. If the user
+                // edited the name in custom mode, the prior match is no longer
+                // valid — force a fresh picker selection.
+                const nameUnchanged = item.name === item._backupName;
+                onUpdate({
+                  isCustom: false,
+                  ingredientId: nameUnchanged ? item._backupIngredientId : undefined,
+                  nickname: nameUnchanged ? (item._backupNickname ?? "") : "",
+                  _backupIngredientId: undefined,
+                  _backupNickname: undefined,
+                  _backupName: undefined,
+                });
               }
-              style={{ marginLeft: 4 }}
+            }}
+            style={({ pressed }) => [
+              styles.customToggle,
+              pressed && { opacity: 0.7 },
+            ]}
+            hitSlop={6}
+          >
+            <View
+              style={[
+                styles.customCheckbox,
+                item.isCustom && styles.customCheckboxOn,
+              ]}
+            >
+              {item.isCustom && (
+                <Ionicons
+                  name="checkmark"
+                  size={14}
+                  color={Colors.onPrimary}
+                />
+              )}
+            </View>
+            <Text
+              style={[
+                styles.customToggleText,
+                item.isCustom && styles.customToggleTextOn,
+              ]}
+            >
+              내 재료
+            </Text>
+          </Pressable>
+          <Pressable
+            onPress={() => setInfoOpen(true)}
+            hitSlop={8}
+            style={styles.infoButton}
+          >
+            <Ionicons
+              name="information-circle-outline"
+              size={18}
+              color={Colors.outline}
             />
-          )}
-        </Pressable>
+          </Pressable>
+        </View>
         {!hideDelete && onDelete && (
           <Pressable onPress={onDelete} style={{ padding: Spacing.xs }}>
             <Text style={styles.deleteText}>삭제하기</Text>
@@ -153,22 +222,70 @@ export function IngredientEditCard({
         )}
       </View>
 
-      {/* Name missing hint */}
-      {item.name === "" && (
+      {/* Header: tappable name (picker) or free text input (custom mode) */}
+      <View style={styles.cardHeader}>
+        {item.isCustom ? (
+          <TextInput
+            value={item.name}
+            onChangeText={(v) => onUpdate({ name: v })}
+            placeholder="재료 이름 입력"
+            placeholderTextColor={Colors.outline}
+            style={styles.customNameInput}
+          />
+        ) : (
+          <Pressable
+            onPress={onCategoryPress}
+            disabled={!onCategoryPress}
+            style={({ pressed }) => [
+              styles.cardNameBtn,
+              nameNeedsAction && styles.cardNameBtnNeedsAction,
+              pressed && onCategoryPress && { opacity: 0.6 },
+            ]}
+          >
+            {/* Invisible left spacer mirrors the chevron on the right so the
+                text sits at the true horizontal center, not visually shifted
+                by the chevron's width. */}
+            {onCategoryPress && <View style={styles.cardNameChevronSpacer} />}
+            <Text
+              numberOfLines={1}
+              ellipsizeMode="tail"
+              style={[
+                styles.cardName,
+                nameNeedsAction && styles.cardNamePlaceholder,
+              ]}
+            >
+              {item.name || "식재료 선택"}
+            </Text>
+            {onCategoryPress && (
+              <Ionicons
+                name="chevron-down"
+                size={16}
+                color={nameNeedsAction ? Colors.error : Colors.outline}
+                style={styles.cardNameChevron}
+              />
+            )}
+          </Pressable>
+        )}
+      </View>
+
+      {/* Name needs-action hint (empty OR OCR unmatched) */}
+      {nameNeedsAction && (
         <View style={styles.errorRow}>
           <Ionicons name="information-circle" size={14} color={Colors.error} />
-          <Text style={styles.errorText}>식재료 종류를 선택해주세요</Text>
+          <Text style={styles.errorText}>식재료를 선택해주세요</Text>
         </View>
       )}
 
-      {/* Nickname input */}
-      <TextInput
-        value={item.nickname}
-        onChangeText={(v) => onUpdate({ nickname: v })}
-        placeholder="(선택) 상세 이름 입력"
-        placeholderTextColor={Colors.outline}
-        style={styles.nicknameInput}
-      />
+      {/* Nickname input — hidden in custom mode */}
+      {!item.isCustom && (
+        <TextInput
+          value={item.nickname}
+          onChangeText={(v) => onUpdate({ nickname: v })}
+          placeholder="(선택) 상세 이름 입력"
+          placeholderTextColor={Colors.outline}
+          style={styles.nicknameInput}
+        />
+      )}
 
       {/* Quantity (Task 1: unified input-field grammar) */}
       <CapacityInput
@@ -218,24 +335,48 @@ export function IngredientEditCard({
         })}
       </View>
 
-      {/* Quick-pick expiry — renders nothing if no master record matches. */}
-      <QuickExpiryPicker
-        ingredientId={item.ingredientId}
-        storage={item.storage}
-        purchaseDate={purchaseDate ?? new Date()}
-        onPick={(d) => onUpdate({ expirationDate: d })}
-      />
-
-      {/* Expiration date */}
-      <ExpandableDatePicker
-        label="소비기한"
-        value={item.expirationDate ?? new Date()}
-        onChange={(d) => onUpdate({ expirationDate: d })}
-        disabled={isFrozen}
-        disabledText="무제한 (냉동)"
-        suffix="까지"
-      />
+      {/* Expiry group: chips + date picker wrapped in a single labeled
+          container so the connection between them reads visually. When the
+          chips can't render (no master / no storage / isCustom), fall back
+          to the date picker standalone with its own label. */}
+      {hasQuickExpiry ? (
+        <View style={styles.expiryGroup}>
+          <Text style={styles.expiryGroupLabel}>소비기한</Text>
+          <QuickExpiryPicker
+            ingredientId={item.ingredientId}
+            storage={item.storage}
+            purchaseDate={purchaseDate ?? new Date()}
+            expirationDate={item.expirationDate}
+            onPick={(d) => onUpdate({ expirationDate: d })}
+            showLabel={false}
+            inGroup
+          />
+          <ExpandableDatePicker
+            value={item.expirationDate ?? new Date()}
+            onChange={(d) =>
+              onUpdate({ expirationDate: d, expirationManuallySet: true })
+            }
+            suffix="까지"
+          />
+        </View>
+      ) : (
+        <ExpandableDatePicker
+          label="소비기한"
+          value={item.expirationDate ?? new Date()}
+          onChange={(d) =>
+            onUpdate({ expirationDate: d, expirationManuallySet: true })
+          }
+          suffix="까지"
+        />
+      )}
     </View>
+    <InfoModal
+      visible={infoOpen}
+      title="내 재료란?"
+      body="KeepEat 식재료 목록에 없는 재료를 직접 추가할 수 있어요. 단, 레시피 추천에는 사용되지 않아요."
+      onClose={() => setInfoOpen(false)}
+    />
+    </>
   );
 }
 
@@ -251,43 +392,78 @@ const styles = StyleSheet.create({
   cardError: {
     backgroundColor: "rgba(255, 218, 214, 0.08)",
   },
-  cardHeader: {
+  topRow: {
     flexDirection: "row",
     justifyContent: "space-between",
+    alignItems: "center",
+  },
+  toggleGroup: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: Spacing.sm,
+  },
+  customToggle: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: Spacing.xs + 2,
+    paddingVertical: Spacing.xs,
+  },
+  customCheckbox: {
+    width: 20,
+    height: 20,
+    borderRadius: 6,
+    backgroundColor: Colors.surfaceContainerHigh,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  customCheckboxOn: {
+    backgroundColor: Colors.primary,
+  },
+  customToggleText: {
+    fontSize: FontSize.bodyMd,
+    fontWeight: FontWeight.medium,
+    color: Colors.onSurfaceVariant,
+  },
+  customToggleTextOn: {
+    color: Colors.primary,
+  },
+  infoButton: {
+    padding: 2,
+  },
+  cardHeader: {
+    flexDirection: "row",
+    justifyContent: "center",
     alignItems: "center",
   },
   cardNameBtn: {
     flexDirection: "row",
     alignItems: "center",
-  },
-  cardName: {
-    fontSize: FontSize.titleLg,
-    fontWeight: FontWeight.bold,
-    color: Colors.onSurface,
-  },
-  cardNameBtnEmpty: {
-    backgroundColor: Colors.surfaceContainerLow,
+    justifyContent: "center",
     paddingHorizontal: Spacing.base,
     paddingVertical: Spacing.md,
     borderRadius: Radius.lg,
   },
+  cardName: {
+    fontSize: 22,
+    fontWeight: FontWeight.bold,
+    color: Colors.onSurface,
+    textAlign: "center",
+    flexShrink: 1,
+  },
+  cardNameChevron: {
+    marginLeft: 4,
+  },
+  cardNameChevronSpacer: {
+    width: 16,
+    marginRight: 4,
+  },
+  cardNameBtnNeedsAction: {
+    backgroundColor: "rgba(255, 218, 214, 0.20)",
+  },
   cardNamePlaceholder: {
-    fontSize: FontSize.bodyMd,
     color: Colors.error,
     fontWeight: FontWeight.medium,
     opacity: 0.7,
-  },
-  matchBadge: {
-    marginLeft: Spacing.sm,
-    paddingHorizontal: Spacing.sm,
-    paddingVertical: 2,
-    borderRadius: Radius.sm,
-    backgroundColor: Colors.errorContainer,
-  },
-  matchBadgeText: {
-    fontSize: FontSize.labelSm,
-    fontWeight: FontWeight.bold,
-    color: Colors.error,
   },
   deleteText: {
     fontSize: FontSize.bodySm,
@@ -304,9 +480,21 @@ const styles = StyleSheet.create({
     fontWeight: FontWeight.medium,
     color: Colors.onSurface,
   },
+  customNameInput: {
+    width: "100%",
+    backgroundColor: Colors.fieldBackground,
+    borderRadius: Radius.lg,
+    paddingHorizontal: Spacing.base,
+    paddingVertical: Spacing.md,
+    fontSize: 22,
+    fontWeight: FontWeight.bold,
+    color: Colors.onSurface,
+    textAlign: "center",
+  },
   errorRow: {
     flexDirection: "row",
     alignItems: "center",
+    justifyContent: "center",
     gap: Spacing.xs,
     marginTop: -Spacing.sm,
   },
@@ -346,5 +534,17 @@ const styles = StyleSheet.create({
   },
   storageChipTextDisabled: {
     color: Colors.outline,
+  },
+  expiryGroup: {
+    backgroundColor: Colors.surfaceContainerLow,
+    borderRadius: Radius.lg,
+    padding: Spacing.base,
+    gap: Spacing.sm,
+  },
+  expiryGroupLabel: {
+    fontSize: FontSize.labelSm,
+    fontWeight: FontWeight.bold,
+    color: Colors.primary,
+    letterSpacing: LetterSpacing.wide,
   },
 });

@@ -40,6 +40,10 @@ interface IngredientPickerSheetProps {
   /** Returns the picked master ingredient — id is the value the API needs. */
   onSelect: (entry: { id: number; name: string }) => void;
   onClose: () => void;
+  /** 검색 결과 빈 상태에서 "직접 추가하기" 누름. name은 검색어. */
+  onPickCustom?: (name: string) => void;
+  /** picker 열릴 때 검색창에 자동 입력될 초기값. 빈 문자열이면 prefill 없음. */
+  initialQuery?: string;
 }
 
 export function IngredientPickerSheet({
@@ -47,23 +51,28 @@ export function IngredientPickerSheet({
   selected,
   onSelect,
   onClose,
+  onPickCustom,
+  initialQuery,
 }: IngredientPickerSheetProps) {
   const insets = useSafeAreaInsets();
   const [search, setSearch] = useState("");
   const [recents, setRecents] = useState<RecentEntry[]>([]);
   const inputRef = useRef<TextInput>(null);
 
-  // Reset query + reload recents whenever the sheet opens.
+  // Prefill query + reload recents whenever the sheet opens. The query is
+  // seeded from `initialQuery` (e.g. the calling card's current name) so an
+  // UNMATCHED card lands the user straight on the relevant search.
   useEffect(() => {
     if (!visible) {
       setSearch("");
       return;
     }
+    setSearch(initialQuery ?? "");
     getRecentIngredients().then(setRecents);
     // Autofocus once the modal has had a chance to render.
     const handle = setTimeout(() => inputRef.current?.focus(), 250);
     return () => clearTimeout(handle);
-  }, [visible]);
+  }, [visible, initialQuery]);
 
   const handlePick = useCallback(
     (entry: IngredientMasterEntry | RecentEntry) => {
@@ -81,6 +90,15 @@ export function IngredientPickerSheet({
     Keyboard.dismiss();
     onClose();
   }, [onClose]);
+
+  const handlePickCustom = useCallback(() => {
+    if (!onPickCustom) return;
+    const name = search.trim();
+    if (name === "") return;
+    Keyboard.dismiss();
+    onClose();
+    onPickCustom(name);
+  }, [onClose, onPickCustom, search]);
 
   const trimmed = search.trim();
 
@@ -218,8 +236,21 @@ export function IngredientPickerSheet({
                 <Text style={styles.placeholderText}>
                   찾으시는 식재료가 없나요?
                 </Text>
+                {trimmed.length > 0 && onPickCustom && (
+                  <Pressable
+                    onPress={handlePickCustom}
+                    style={({ pressed }) => [
+                      styles.customAddButton,
+                      pressed && { opacity: 0.8 },
+                    ]}
+                  >
+                    <Text style={styles.customAddText}>
+                      "{trimmed}" 직접 추가하기
+                    </Text>
+                  </Pressable>
+                )}
                 <Text style={styles.placeholderRequest}>
-                  KeepEat 팀에게 추가 요청하기
+                  KeepEat 팀에 알리기
                 </Text>
               </View>
             )}
@@ -384,5 +415,19 @@ const styles = StyleSheet.create({
     color: Colors.primary,
     textAlign: "center",
     marginTop: Spacing.xs,
+  },
+  customAddButton: {
+    marginTop: Spacing.lg,
+    paddingHorizontal: Spacing.xl,
+    paddingVertical: Spacing.md,
+    borderRadius: Radius.lg,
+    backgroundColor: Colors.primary,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  customAddText: {
+    fontSize: FontSize.bodyMd,
+    fontWeight: FontWeight.bold,
+    color: Colors.onPrimary,
   },
 });

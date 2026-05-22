@@ -18,6 +18,7 @@ import { useCallback, useEffect, useState } from "react";
 import {
   BackHandler,
   Dimensions,
+  type LayoutChangeEvent,
   Platform,
   Pressable,
   ScrollView,
@@ -39,8 +40,15 @@ import Animated, {
 } from "react-native-reanimated";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
-const { width: SCREEN_WIDTH } = Dimensions.get("window");
+const { width: SCREEN_WIDTH, height: SCREEN_HEIGHT } = Dimensions.get("window");
 const SWIPE_THRESHOLD = SCREEN_WIDTH * 0.3;
+
+// Card height bounds. Front face usually fits in the min; back face (cooking
+// steps) grows naturally up to the max and then scrolls internally. The
+// wrapper's animated height interpolates between the two measured faces so
+// the flip transition doesn't pop.
+const CARD_MIN_HEIGHT = SCREEN_HEIGHT * 0.5;
+const CARD_MAX_HEIGHT = SCREEN_HEIGHT * 0.8;
 
 // ─── Swipe Card ──────────────────────────────────────────────────────────────
 
@@ -56,6 +64,29 @@ function SwipeCard({
   const translateX = useSharedValue(0);
   const translateY = useSharedValue(0);
   const flipProgress = useSharedValue(0); // 0 = front, 1 = back
+
+  // Measured natural height of each face. Both faces are absolute-positioned
+  // (no `bottom`) so their onLayout reports content-driven height. The wrapper
+  // then interpolates its own height between these two values as the card flips.
+  const frontHeight = useSharedValue(0);
+  const backHeight = useSharedValue(0);
+
+  const onFrontLayout = useCallback(
+    (e: LayoutChangeEvent) => {
+      const h = e.nativeEvent.layout.height;
+      if (h > 0) frontHeight.value = h;
+    },
+    [frontHeight],
+  );
+
+  const onBackLayout = useCallback(
+    (e: LayoutChangeEvent) => {
+      const h = e.nativeEvent.layout.height;
+      // Clamp at measure time so internal scroll kicks in for very long step lists.
+      if (h > 0) backHeight.value = Math.min(h, CARD_MAX_HEIGHT);
+    },
+    [backHeight],
+  );
 
   const processSwipe = useCallback(
     (direction: "left" | "right") => {
@@ -189,11 +220,32 @@ function SwipeCard({
     };
   });
 
+  // Wrapper height tracks the currently-visible face's measured natural
+  // height (clamped to [MIN, MAX]) and interpolates during flip. Before the
+  // first layout measurement arrives, fall back to MIN so the card doesn't
+  // collapse to zero height (both faces are absolute-positioned).
+  const wrapperHeightStyle = useAnimatedStyle(() => {
+    if (frontHeight.value === 0 && backHeight.value === 0) {
+      return { height: CARD_MIN_HEIGHT };
+    }
+    const front = Math.max(frontHeight.value || CARD_MIN_HEIGHT, CARD_MIN_HEIGHT);
+    const back = Math.max(backHeight.value || CARD_MIN_HEIGHT, CARD_MIN_HEIGHT);
+    return {
+      height: interpolate(flipProgress.value, [0, 1], [front, back]),
+    };
+  });
+
   return (
     <GestureDetector gesture={combinedGesture}>
-      <Animated.View style={[styles.cardWrapper, cardStyle, cardGlowStyle]}>
-        {/* Front face — sizes the wrapper naturally via normal flow */}
-        <Animated.View style={[styles.card, frontStyle]}>
+      <Animated.View
+        style={[styles.cardWrapper, cardStyle, cardGlowStyle, wrapperHeightStyle]}
+      >
+        {/* Front face — absolute overlay (no `bottom`) so onLayout reports
+            the natural content height that drives the wrapper's animated size. */}
+        <Animated.View
+          style={[styles.card, styles.cardFront, frontStyle]}
+          onLayout={onFrontLayout}
+        >
           <Text style={styles.cardTitle}>{recipe.title}</Text>
           <View style={styles.metaContainer}>
             {/* Row 1: 보유 (emphasized) · kcal */}
@@ -262,8 +314,12 @@ function SwipeCard({
           )}
         </Animated.View>
 
-        {/* Back face — absolute overlay, shows cooking steps */}
-        <Animated.View style={[styles.card, styles.cardBack, backStyle]}>
+        {/* Back face — absolute overlay, shows cooking steps. Same sizing
+            model as the front; measured height drives the wrapper interp. */}
+        <Animated.View
+          style={[styles.card, styles.cardBack, backStyle]}
+          onLayout={onBackLayout}
+        >
           <Text style={styles.backTitle} numberOfLines={2}>
             {recipe.title}
           </Text>
@@ -602,20 +658,32 @@ const styles = StyleSheet.create({
     paddingTop: Spacing.xxl + 8,
     paddingBottom: Spacing.xxl + 16,
     justifyContent: "flex-start",
-    minHeight: 340,
     shadowColor: "#191C1D",
     shadowOffset: { width: 0, height: 4 },
     shadowOpacity: 0.12,
     shadowRadius: 12,
     elevation: 4,
   },
-  // Back face — exact overlay of the front face within the wrapper.
+  // Front face — absolute overlay, content-sized within [MIN, MAX].
+  // The previously in-flow front face no longer dictates wrapper height;
+  // wrapperHeightStyle now interpolates between both faces' measurements.
+  cardFront: {
+    position: "absolute",
+    top: 0,
+    left: 0,
+    right: 0,
+    minHeight: CARD_MIN_HEIGHT,
+    maxHeight: CARD_MAX_HEIGHT,
+  },
+  // Back face — same constraints as the front. `maxHeight` here is what
+  // triggers internal scroll on `stepsScroll` for long recipes.
   cardBack: {
     position: "absolute",
     top: 0,
     left: 0,
     right: 0,
-    bottom: 0,
+    minHeight: CARD_MIN_HEIGHT,
+    maxHeight: CARD_MAX_HEIGHT,
   },
   cardTitle: {
     fontSize: 26,
@@ -719,7 +787,11 @@ const styles = StyleSheet.create({
     marginBottom: Spacing.lg,
   },
   stepsScroll: {
-    flex: 1,
+    // No `flex: 1`: ScrollView sizes by content so short step lists let the
+    // back face — and through it the wrapper — measure tight. `flexShrink: 1`
+    // lets the cardBack's maxHeight cascade and engage internal scrolling
+    // when the steps content would otherwise overflow.
+    flexShrink: 1,
   },
   stepsContent: {
     paddingBottom: Spacing.base,

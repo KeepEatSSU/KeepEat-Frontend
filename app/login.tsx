@@ -1,43 +1,48 @@
-import { useState, useRef } from "react";
-import {
-  View,
-  Text,
-  TextInput,
-  Pressable,
-  KeyboardAvoidingView,
-  Platform,
-  Keyboard,
-  TouchableWithoutFeedback,
-  ScrollView,
-  ActivityIndicator,
-  StyleSheet,
-} from "react-native";
-import { useRouter } from "expo-router";
-import { useSafeAreaInsets } from "react-native-safe-area-context";
-import { Ionicons } from "@expo/vector-icons";
-import { isAxiosError } from "axios";
-import { useAuth } from "@/context/AuthContext";
+import { AppHeaderLogo } from "@/components/AppHeaderLogo";
 import {
   Colors,
-  Spacing,
   FontSize,
   FontWeight,
+  LetterSpacing,
   Radius,
   Shadows,
-  LetterSpacing,
+  Spacing,
 } from "@/constants/theme";
+import { useAuth } from "@/context/AuthContext";
+import { startGoogleLogin } from "@/services/googleAuth";
+import { useToast } from "@/components/Toast";
+import { Ionicons } from "@expo/vector-icons";
+import { isAxiosError } from "axios";
+import { useRouter } from "expo-router";
+import { useRef, useState } from "react";
+import {
+  ActivityIndicator,
+  Keyboard,
+  KeyboardAvoidingView,
+  Platform,
+  Pressable,
+  ScrollView,
+  StyleSheet,
+  Text,
+  TextInput,
+  TouchableWithoutFeedback,
+  View,
+} from "react-native";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 export default function LoginScreen() {
   const router = useRouter();
   const insets = useSafeAreaInsets();
   const passwordRef = useRef<TextInput>(null);
-  const { login } = useAuth();
+  const { login, loginWithTokens } = useAuth();
+  const { showToast } = useToast();
 
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [error, setError] = useState("");
   const [showPassword, setShowPassword] = useState(false);
   const [submitting, setSubmitting] = useState(false);
+  const [googleSubmitting, setGoogleSubmitting] = useState(false);
 
   const handleLogin = async () => {
     Keyboard.dismiss();
@@ -60,6 +65,25 @@ export default function LoginScreen() {
 
   const canSubmit = email.length > 0 && password.length > 0 && !submitting;
 
+  const handleGoogleLogin = async () => {
+    if (googleSubmitting) return;
+    setGoogleSubmitting(true);
+    setError("");
+    try {
+      const tokens = await startGoogleLogin();
+      if (!tokens) {
+        // Cancel / dismiss / missing tokens — silent. Avoid leaking why.
+        return;
+      }
+      await loginWithTokens(tokens.accessToken, tokens.refreshToken);
+      router.replace("/(tabs)");
+    } catch {
+      showToast("구글 로그인에 실패했어요. 잠시 후 다시 시도해주세요");
+    } finally {
+      setGoogleSubmitting(false);
+    }
+  };
+
   return (
     <TouchableWithoutFeedback onPress={Keyboard.dismiss}>
       <KeyboardAvoidingView
@@ -73,14 +97,8 @@ export default function LoginScreen() {
         >
           {/* Hero */}
           <View style={styles.hero}>
-            <View style={styles.logoRow}>
-              <Ionicons
-                name="leaf"
-                size={28}
-                color={Colors.primaryContainer}
-                style={{ marginRight: 8 }}
-              />
-              <Text style={styles.logoText}>KeepEat</Text>
+            <View style={styles.logoWrap}>
+              <AppHeaderLogo widthRatio={0.4} />
             </View>
             <Text style={styles.heroTitle}>
               오늘도 냉장고를{"\n"}가볍게 비워볼까요?
@@ -209,11 +227,32 @@ export default function LoginScreen() {
             <View style={styles.dividerLine} />
           </View>
 
-          {/* Social placeholder */}
+          {/* Social — Google */}
           <View style={styles.socialArea}>
-            <Text style={styles.socialHint}>
-              소셜 로그인 (준비 중)
-            </Text>
+            <Pressable
+              onPress={handleGoogleLogin}
+              disabled={googleSubmitting}
+              style={({ pressed }) => [
+                styles.googleBtn,
+                googleSubmitting && styles.googleBtnDisabled,
+                !googleSubmitting &&
+                  pressed && { opacity: 0.85, transform: [{ scale: 0.98 }] },
+              ]}
+            >
+              {googleSubmitting ? (
+                <ActivityIndicator color={Colors.onSurface} />
+              ) : (
+                <>
+                  <Ionicons
+                    name="logo-google"
+                    size={18}
+                    color={Colors.onSurface}
+                    style={{ marginRight: Spacing.sm }}
+                  />
+                  <Text style={styles.googleBtnText}>Google로 계속하기</Text>
+                </>
+              )}
+            </Pressable>
           </View>
         </ScrollView>
       </KeyboardAvoidingView>
@@ -237,16 +276,8 @@ const styles = StyleSheet.create({
     marginTop: 48,
     marginBottom: Spacing.xl,
   },
-  logoRow: {
-    flexDirection: "row",
-    alignItems: "center",
+  logoWrap: {
     marginBottom: Spacing.base,
-  },
-  logoText: {
-    fontSize: FontSize.headlineMd,
-    fontWeight: FontWeight.extraBold,
-    color: Colors.primary,
-    letterSpacing: LetterSpacing.tight,
   },
   heroTitle: {
     fontSize: 23,
@@ -363,12 +394,24 @@ const styles = StyleSheet.create({
 
   // Social
   socialArea: {
-    alignItems: "center",
-    paddingVertical: Spacing.lg,
+    alignItems: "stretch",
+    paddingVertical: Spacing.sm,
   },
-  socialHint: {
-    fontSize: FontSize.bodySm,
-    fontWeight: FontWeight.medium,
-    color: Colors.outlineVariant,
+  googleBtn: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: Colors.surfaceContainerLowest,
+    borderRadius: Radius.xl,
+    paddingVertical: Spacing.base,
+    ...Shadows.ambient,
+  },
+  googleBtnDisabled: {
+    opacity: 0.6,
+  },
+  googleBtnText: {
+    fontSize: FontSize.bodyLg,
+    fontWeight: FontWeight.semiBold,
+    color: Colors.onSurface,
   },
 });

@@ -14,8 +14,13 @@ import {
 } from "@/constants/theme";
 import type { IngredientDraft } from "@/constants/domain";
 import {
+  METRIC_TO_DAYS,
+  STORAGE_OPTIONS_BY_INGREDIENT_ID,
+} from "@/constants/ingredients-master";
+import {
   createIngredients,
   mapIngredientToCreateRequest,
+  mapStorageTypeFromApi,
 } from "@/services/userIngredients";
 import { ocrPending, mapOcrCandidateToDraft } from "@/services/ocr";
 import { CommonActions } from "@react-navigation/native";
@@ -42,7 +47,7 @@ function createEmptyDraft(): IngredientDraft {
     nickname: "",
     quantity: 1,
     unit: "개",
-    storage: "fridge",
+    storage: null,
     expirationDate: expiry,
   };
 }
@@ -87,7 +92,11 @@ export default function AddConfirmScreen() {
   };
 
   const hasAnyError = items.some(
-    (it) => it.name.trim() === "" || it.quantity === null || it.quantity < 1,
+    (it) =>
+      it.name.trim() === "" ||
+      it.quantity === null ||
+      it.quantity < 1 ||
+      it.storage == null,
   );
 
   const resetToHome = () => {
@@ -108,10 +117,23 @@ export default function AddConfirmScreen() {
   const handleConfirm = async () => {
     if (hasAnyError || submitting) return;
 
-    // Every draft must be linked to a master ingredient before submit. OCR
-    // can return UNMATCHED rows that look filled but have no `ingredientId`,
-    // and the manual-entry empty case is already caught by `hasAnyError`.
-    const unmatched = items.some((it) => it.ingredientId == null);
+    // Temporary: backend contract for custom ("내 재료") items is still TBD,
+    // so block the whole submit if any card is in custom mode. Replace with
+    // a per-item branch in mapIngredientToCreateRequest once the API lands.
+    const hasCustom = items.some((it) => it.isCustom === true);
+    if (hasCustom) {
+      showToast("내 재료 기능은 곧 사용 가능해요");
+      return;
+    }
+
+    // Every non-custom draft must be linked to a master ingredient before
+    // submit. OCR can return UNMATCHED rows that look filled but have no
+    // `ingredientId`; the manual-entry empty case is already caught by
+    // `hasAnyError`. Custom cards are intentionally excluded — they have no
+    // master link by design.
+    const unmatched = items.some(
+      (it) => !it.isCustom && it.ingredientId == null,
+    );
     if (unmatched) {
       showToast("매칭이 필요한 항목이 있어요. 식재료를 선택해주세요");
       return;
@@ -150,12 +172,65 @@ export default function AddConfirmScreen() {
   };
 
   const handleCategorySelect = (entry: { id: number; name: string }) => {
-    if (editingItemId) {
-      updateItem(editingItemId, {
-        name: entry.name,
-        ingredientId: entry.id,
-      });
+    if (!editingItemId) return;
+
+    // Inspect the picked master's storage options to decide whether storage
+    // can be auto-selected. Unambiguous masters (즉석밥 → 실온만) auto-fill;
+    // ambiguous ones (삼겹살 → 냉장/냉동) leave it null so the user picks
+    // deliberately. When auto-filling, also seed the expiry from the master's
+    // (min+max)/2 days for that storage.
+    const options = STORAGE_OPTIONS_BY_INGREDIENT_ID.get(entry.id) ?? [];
+    const uniqueDomains = Array.from(
+      new Set(options.map((o) => mapStorageTypeFromApi(o.storageType))),
+    );
+
+    // Picking a new master is treated as a fresh context — reset the
+    // manually-edited flag so storage changes can auto-update the expiry
+    // again against the new master's averages.
+    const patch: Partial<IngredientDraft> = {
+      name: entry.name,
+      ingredientId: entry.id,
+      expirationManuallySet: false,
+    };
+
+    if (uniqueDomains.length === 1) {
+      const storage = uniqueDomains[0];
+      patch.storage = storage;
+      const opt = options.find(
+        (o) => mapStorageTypeFromApi(o.storageType) === storage,
+      );
+      if (opt) {
+        const avgDays = Math.max(
+          1,
+          Math.round(((opt.min + opt.max) / 2) * METRIC_TO_DAYS[opt.metric]),
+        );
+        const expiry = new Date(purchaseDate);
+        expiry.setDate(expiry.getDate() + avgDays);
+        patch.expirationDate = expiry;
+      }
+    } else {
+      patch.storage = null;
     }
+
+    updateItem(editingItemId, patch);
+  };
+
+  const handlePickCustom = (name: string) => {
+    if (!editingItemId) return;
+    const target = items.find((it) => it.id === editingItemId);
+    if (!target) return;
+    // Mirror IngredientEditCard's toggle-ON logic: back up the current master
+    // link + nickname + name so the user can toggle back to OFF later, and
+    // overwrite `name` with the picker's search query.
+    updateItem(editingItemId, {
+      isCustom: true,
+      _backupIngredientId: target.ingredientId,
+      _backupNickname: target.nickname,
+      _backupName: target.name,
+      ingredientId: undefined,
+      nickname: "",
+      name,
+    });
   };
 
   const editingItem = items.find((it) => it.id === editingItemId);
@@ -270,8 +345,10 @@ export default function AddConfirmScreen() {
       <IngredientPickerSheet
         visible={categoryPickerVisible}
         selected={editingItem?.name ?? ""}
+        initialQuery={editingItem?.name ?? ""}
         onSelect={handleCategorySelect}
         onClose={() => setCategoryPickerVisible(false)}
+        onPickCustom={handlePickCustom}
       />
     </View>
   );

@@ -11,6 +11,11 @@ import {
 import { useRouter, useFocusEffect } from "expo-router";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { Ionicons } from "@expo/vector-icons";
+import { AppHeaderRight } from "@/components/AppHeaderRight";
+import {
+  AppSearchChipsHeader,
+  type ChipConfig,
+} from "@/components/AppSearchChipsHeader";
 import {
   Colors,
   Spacing,
@@ -159,6 +164,33 @@ export default function RecipeScreen() {
 
   const hasRecipes = filteredRecipes.length > 0;
 
+  // Per-category recipe count for the chip badges. Drives the small pill
+  // beside each category label so users can see at a glance which buckets
+  // hold their saved recipes.
+  const categoryCounts = useMemo(() => {
+    const counts: Record<string, number> = {};
+    myRecipes.forEach((recipe) => {
+      const cat = recipe.method;
+      if (cat) counts[cat] = (counts[cat] || 0) + 1;
+    });
+    return counts;
+  }, [myRecipes]);
+
+  // Memoized chip list — stable identity across re-renders that don't touch
+  // selection or counts. "전체" deliberately omits `count` so the chip stays
+  // badge-less; the rest pass through the aggregate (0 included → softened).
+  const recipeChips = useMemo<ChipConfig[]>(
+    () =>
+      categories.map((chip) => ({
+        key: chip,
+        label: chip,
+        count: chip === "전체" ? undefined : categoryCounts[chip] ?? 0,
+        isSelected: selectedCategory === chip,
+        onPress: () => setSelectedCategory(chip),
+      })),
+    [categories, selectedCategory, categoryCounts],
+  );
+
   const handleRecommendPress = () => {
     if (status === "idle" || status === "error") {
       requestRecommendation();
@@ -173,42 +205,30 @@ export default function RecipeScreen() {
 
   return (
     <View style={[styles.screen, { paddingTop: insets.top }]}>
-      {/* ── Header (matches fridge tab) ── */}
+      {/* ── Header — search bar + notification/profile in one row ── */}
       <View style={styles.header}>
-        <View style={styles.headerLeft}>
-          <Ionicons
-            name="leaf"
-            size={20}
-            color={Colors.primaryContainer}
-            style={{ marginRight: 6 }}
-          />
-          <Text style={styles.appTitle}>KeepEat</Text>
-        </View>
-        <View style={styles.avatar}>
-          <Ionicons name="person" size={16} color={Colors.onSurfaceVariant} />
-        </View>
-      </View>
-
-      {/* ── Search Bar ── */}
-      <View style={styles.searchBarWrap}>
-        <View style={styles.searchBar}>
+        <View style={styles.searchInHeader}>
           <Ionicons
             name="search"
             size={18}
             color={Colors.onSurfaceVariant}
-            style={{ marginRight: Spacing.sm }}
+            style={styles.searchIcon}
           />
           <TextInput
             value={searchQuery}
             onChangeText={setSearchQuery}
             placeholder="레시피 검색..."
             placeholderTextColor={Colors.outline}
-            style={styles.searchInput}
+            style={styles.searchInputInHeader}
             returnKeyType="search"
             autoCorrect={false}
           />
           {searchQuery.length > 0 && (
-            <Pressable onPress={() => setSearchQuery("")}>
+            <Pressable
+              onPress={() => setSearchQuery("")}
+              accessibilityLabel="검색어 지우기"
+              hitSlop={8}
+            >
               <Ionicons
                 name="close-circle"
                 size={18}
@@ -217,78 +237,63 @@ export default function RecipeScreen() {
             </Pressable>
           )}
         </View>
+        <AppHeaderRight />
       </View>
 
-      {/* ── Keyword Chips ── */}
-      <ScrollView
-        horizontal
-        showsHorizontalScrollIndicator={false}
-        contentContainerStyle={styles.chipsContent}
-        style={styles.chipsScroll}
-      >
-        {categories.map((chip) => {
-          const isSelected = selectedCategory === chip;
-          return (
+      <AppSearchChipsHeader
+        searchPlaceholder="레시피 검색..."
+        searchValue={searchQuery}
+        onSearchChange={setSearchQuery}
+        chips={recipeChips}
+        chipsLayout="scroll"
+        showSearch={false}
+        belowChipsSlot={
+          <View style={styles.recommendRow}>
             <Pressable
-              key={chip}
-              onPress={() => setSelectedCategory(chip)}
-              style={[styles.chip, isSelected && styles.chipSelected]}
+              onPress={handleRecommendPress}
+              disabled={status === "loading" || status === "swiping"}
+              style={({ pressed }) => [
+                styles.recommendBtn,
+                status === "loading" && styles.recommendBtnLoading,
+                status === "ready" && styles.recommendBtnReady,
+                status !== "loading" &&
+                  status !== "swiping" &&
+                  pressed &&
+                  styles.recommendBtnPressed,
+              ]}
             >
-              <Text
-                style={[styles.chipText, isSelected && styles.chipTextSelected]}
-              >
-                {chip}
-              </Text>
+              {status === "loading" ? (
+                <>
+                  <ActivityIndicator size={16} color={Colors.primary} />
+                  <Text style={styles.recommendTextLoading}>
+                    AI 셰프가 요리 중...
+                  </Text>
+                </>
+              ) : status === "ready" ? (
+                <>
+                  <Ionicons
+                    name="sparkles"
+                    size={18}
+                    color={Colors.onPrimary}
+                  />
+                  <Text style={styles.recommendText}>
+                    눌러서 레시피 확인하기
+                  </Text>
+                </>
+              ) : (
+                <>
+                  <Ionicons
+                    name="sparkles"
+                    size={18}
+                    color={Colors.onPrimary}
+                  />
+                  <Text style={styles.recommendText}>레시피 추천</Text>
+                </>
+              )}
             </Pressable>
-          );
-        })}
-      </ScrollView>
-
-      {/* ── Recommend Button (always visible) ── */}
-      <View style={styles.recommendRow}>
-        <Pressable
-          onPress={handleRecommendPress}
-          disabled={status === "loading" || status === "swiping"}
-          style={({ pressed }) => [
-            styles.recommendBtn,
-            status === "loading" && styles.recommendBtnLoading,
-            status === "ready" && styles.recommendBtnReady,
-            status !== "loading" &&
-              status !== "swiping" &&
-              pressed &&
-              styles.recommendBtnPressed,
-          ]}
-        >
-          {status === "loading" ? (
-            <>
-              <ActivityIndicator size={16} color={Colors.primary} />
-              <Text style={styles.recommendTextLoading}>
-                AI 셰프가 요리 중...
-              </Text>
-            </>
-          ) : status === "ready" ? (
-            <>
-              <Ionicons
-                name="sparkles"
-                size={18}
-                color={Colors.onPrimary}
-              />
-              <Text style={styles.recommendText}>
-                눌러서 레시피 확인하기
-              </Text>
-            </>
-          ) : (
-            <>
-              <Ionicons
-                name="sparkles"
-                size={18}
-                color={Colors.onPrimary}
-              />
-              <Text style={styles.recommendText}>레시피 추천</Text>
-            </>
-          )}
-        </Pressable>
-      </View>
+          </View>
+        }
+      />
 
       {/* ── Content ── */}
       {isLoadingRecipes ? (
@@ -331,86 +336,38 @@ const styles = StyleSheet.create({
     backgroundColor: Colors.surface,
   },
 
-  // Header
+  // Header — search bar takes flex 1 with AppHeaderRight (notification + profile)
+  // pinned to the trailing edge. `gap` keeps the two clusters from touching.
   header: {
     flexDirection: "row",
-    justifyContent: "space-between",
     alignItems: "center",
     paddingHorizontal: Spacing.xl,
     paddingTop: Spacing.base,
     paddingBottom: Spacing.md,
+    gap: Spacing.sm,
   },
-  headerLeft: {
-    flexDirection: "row",
-    alignItems: "center",
-  },
-  appTitle: {
-    fontSize: FontSize.titleLg,
-    fontWeight: FontWeight.bold,
-    color: Colors.primary,
-    letterSpacing: LetterSpacing.tight,
-  },
-  avatar: {
-    width: 40,
-    height: 40,
-    borderRadius: Radius.full,
-    backgroundColor: Colors.surfaceContainerHigh,
-    alignItems: "center",
-    justifyContent: "center",
-  },
-
-  // Search Bar
-  searchBarWrap: {
-    paddingHorizontal: Spacing.xl,
-    marginBottom: Spacing.md,
-  },
-  searchBar: {
+  // Header-embedded search bar — same visual token as the standalone variant
+  // in AppSearchChipsHeader so swapping placement doesn't shift the design.
+  searchInHeader: {
+    flex: 1,
     flexDirection: "row",
     alignItems: "center",
     backgroundColor: Colors.surfaceContainerLow,
     borderRadius: Radius.full,
     paddingHorizontal: Spacing.base,
     paddingVertical: Spacing.md,
+    minHeight: 44,
   },
-  searchInput: {
+  searchIcon: {
+    marginRight: Spacing.sm,
+  },
+  searchInputInHeader: {
     flex: 1,
     fontSize: FontSize.bodyMd,
     fontWeight: FontWeight.medium,
     color: Colors.onSurface,
     padding: 0,
     margin: 0,
-  },
-
-  // Keyword Chips
-  chipsScroll: {
-    flexGrow: 0,
-    height: 52,
-    marginBottom: Spacing.xs,
-  },
-  chipsContent: {
-    paddingHorizontal: Spacing.xl,
-    gap: Spacing.sm,
-    alignItems: "center",
-  },
-  chip: {
-    height: 36,
-    paddingHorizontal: Spacing.base,
-    justifyContent: "center",
-    alignItems: "center",
-    backgroundColor: Colors.surfaceContainerHigh,
-    borderRadius: Radius.md,
-  },
-  chipSelected: {
-    backgroundColor: Colors.primary,
-  },
-  chipText: {
-    fontSize: FontSize.bodySm,
-    lineHeight: 20,
-    fontWeight: FontWeight.semiBold,
-    color: Colors.onSurfaceVariant,
-  },
-  chipTextSelected: {
-    color: Colors.onPrimary,
   },
 
   // List

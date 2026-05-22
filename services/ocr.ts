@@ -58,13 +58,29 @@ const API_TO_DOMAIN_STORAGE: Record<ApiStorageType, StorageType> = {
   냉동: "frozen",
 };
 
-function pickStorageOption(
+/**
+ * Resolve storage + expiry from the backend's per-candidate options.
+ * - Single unique domain storage  → auto-select that one + compute expiry
+ *   from its (min+max)/2 days.
+ * - Multiple or zero options      → return null storage/expiry so the user
+ *   is forced to pick deliberately on the add-confirm screen.
+ */
+function resolveStorageAndExpiry(
   options: OcrStorageOption[],
-): { storage: StorageType; avgDays: number } {
-  const first = options[0];
-  if (!first) return { storage: "fridge", avgDays: 7 };
-  const avgDays = Math.max(1, Math.round((first.minDays + first.maxDays) / 2));
-  return { storage: API_TO_DOMAIN_STORAGE[first.storageType], avgDays };
+): { storage: StorageType | null; expirationDate: Date | null } {
+  const uniqueDomains = Array.from(
+    new Set(options.map((o) => API_TO_DOMAIN_STORAGE[o.storageType])),
+  );
+  if (uniqueDomains.length !== 1) {
+    return { storage: null, expirationDate: null };
+  }
+  const storage = uniqueDomains[0];
+  const opt = options.find(
+    (o) => API_TO_DOMAIN_STORAGE[o.storageType] === storage,
+  );
+  if (!opt) return { storage, expirationDate: null };
+  const avgDays = Math.max(1, Math.round((opt.minDays + opt.maxDays) / 2));
+  return { storage, expirationDate: startOfDayPlus(avgDays) };
 }
 
 function startOfDayPlus(days: number): Date {
@@ -91,22 +107,24 @@ export function mapOcrCandidateToDraft(
   // UNMATCHED branch: backend couldn't link this scan to a master entry.
   // Surface the raw text in `name` so the user sees what was detected, leave
   // `ingredientId` undefined so the registration guard keeps the picker
-  // requirement, and skip auto-expiry since we have no storage options.
+  // requirement, and force the user to pick a storage explicitly.
   if (candidate.matchStatus === "UNMATCHED" || candidate.ingredientId == null) {
     return {
       id: localId,
       ingredientId: undefined,
-      name: candidate.rawName ?? "",
+      name: candidate.customName ?? candidate.rawName ?? "",
       nickname: candidate.customName ?? "",
       quantity: candidate.quantity,
       unit,
-      storage: "fridge",
+      storage: null,
       expirationDate: null,
     };
   }
 
-  // MATCHED branch.
-  const { storage, avgDays } = pickStorageOption(candidate.storageOptions);
+  // MATCHED branch — auto-select storage only when unambiguous.
+  const { storage, expirationDate } = resolveStorageAndExpiry(
+    candidate.storageOptions,
+  );
   return {
     id: localId,
     ingredientId: candidate.ingredientId,
@@ -115,7 +133,7 @@ export function mapOcrCandidateToDraft(
     quantity: candidate.quantity,
     unit,
     storage,
-    expirationDate: startOfDayPlus(avgDays),
+    expirationDate,
   };
 }
 
@@ -238,12 +256,24 @@ export async function parseReceiptImage(
     });
 
     if (!response.ok) {
+      if (__DEV__) {
+        const errorBody = await response.text().catch(() => "<unreadable>");
+        console.log(`[OCR] error ${response.status}:`, errorBody);
+      }
       const error: any = new Error("Fetch failed");
       error.status = response.status;
       throw error;
     }
 
     const data: OcrParseResponse = await response.json();
+    if (__DEV__) {
+      const count = data.candidates?.length ?? 0;
+      console.log(`[OCR] received ${count} candidates`);
+      console.log(
+        "[OCR] candidates detail:",
+        JSON.stringify(data.candidates, null, 2),
+      );
+    }
     return data.candidates ?? [];
   } catch (e: any) {
     const status = isAxiosError(e) ? e.response?.status : e.status;

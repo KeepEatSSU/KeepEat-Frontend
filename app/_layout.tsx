@@ -1,14 +1,23 @@
 import { useEffect } from "react";
-import { ActivityIndicator, View } from "react-native";
 import { Stack, useRouter, useSegments } from "expo-router";
 import { StatusBar } from "expo-status-bar";
 import { GestureHandlerRootView } from "react-native-gesture-handler";
 import { PortalProvider } from "@gorhom/portal";
+import * as SplashScreen from "expo-splash-screen";
+import * as WebBrowser from "expo-web-browser";
 import { ToastProvider } from "@/components/Toast";
 import { RecipeRecommendationProvider } from "@/context/RecipeRecommendationContext";
 import { AuthProvider, useAuth } from "@/context/AuthContext";
-import { Colors } from "@/constants/theme";
 import { registerForPushNotificationsAsync } from "@/services/pushNotifications";
+
+// Required for the in-app browser auth session to dismiss cleanly on iOS
+// after a redirect back to the app. Must run once at module scope, before
+// any WebBrowser.openAuthSessionAsync() call elsewhere in the app.
+WebBrowser.maybeCompleteAuthSession();
+
+// Keep the native splash visible until AuthContext finishes its boot-time
+// token validation, then hide it from AuthGate below.
+SplashScreen.preventAutoHideAsync();
 
 // ─── Routing guard ────────────────────────────────────────────────────────────
 // Mounted under <AuthProvider> so it can react to auth state changes
@@ -30,19 +39,16 @@ function AuthGate({ children }: { children: React.ReactNode }) {
     }
   }, [isAuthenticated, isLoading, segments, router]);
 
+  useEffect(() => {
+    if (!isLoading) {
+      SplashScreen.hideAsync();
+    }
+  }, [isLoading]);
+
   if (isLoading) {
-    return (
-      <View
-        style={{
-          flex: 1,
-          alignItems: "center",
-          justifyContent: "center",
-          backgroundColor: Colors.surface,
-        }}
-      >
-        <ActivityIndicator color={Colors.primary} />
-      </View>
-    );
+    // Keep returning null while AuthContext boots so the native splash
+    // (green background + white wordmark) stays on screen — no flicker.
+    return null;
   }
 
   return <>{children}</>;

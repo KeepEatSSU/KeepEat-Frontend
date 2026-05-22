@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef, useMemo } from "react";
+import { useState, useEffect, useMemo } from "react";
 import {
   View,
   Text,
@@ -222,7 +222,6 @@ function DetailEditor({
   const [storage, setStorage] = useState<StorageType>(init.storage);
   const [expirationDate, setExpirationDate] = useState(init.expirationDate);
   const [submitting, setSubmitting] = useState(false);
-  const lastNonFrozenDateRef = useRef<Date | null>(init.expirationDate);
 
   // Reverse-lookup the master ingredient ID from the saved name. Backend
   // doesn't echo this on the user-ingredient row, so falling back to the
@@ -234,24 +233,8 @@ function DetailEditor({
   );
 
   const handleStorageChange = (newStorage: StorageType) => {
-    if (newStorage === "frozen" && storage !== "frozen") {
-      lastNonFrozenDateRef.current = expirationDate;
-      setStorage(newStorage);
-      setExpirationDate(new Date(9999, 0, 1)); // sentinel for "unlimited"
-    } else if (newStorage !== "frozen" && storage === "frozen") {
-      const restored = lastNonFrozenDateRef.current ?? (() => {
-        const d = new Date();
-        d.setDate(d.getDate() + 7);
-        return d;
-      })();
-      setStorage(newStorage);
-      setExpirationDate(restored);
-    } else {
-      setStorage(newStorage);
-    }
+    setStorage(newStorage);
   };
-
-  const isFrozen = storage === "frozen";
 
   // ── Modal visibility ──
   const [saveModalVisible, setSaveModalVisible] = useState(false);
@@ -289,7 +272,11 @@ function DetailEditor({
   });
 
   // ── Handlers ──
-  const handleConfirmSave = async () => {
+  // Single save path used by both the bottom "수정 완료" button and the
+  // back-navigation modal's "저장하고 나가기" branch. The modal-visibility
+  // reset at the top is a no-op when the button is the trigger, which keeps
+  // the call sites identical and avoids a duplicate patch-building block.
+  const handleSaveAndExit = async () => {
     setSaveModalVisible(false);
     if (submitting) return;
     setSubmitting(true);
@@ -310,16 +297,17 @@ function DetailEditor({
 
       if (Object.keys(patch).length > 0) {
         await updateIngredient(Number(id), mapIngredientToUpdateRequest(patch));
-        showToast("수정되었어요");
+        showToast("변경된 정보가 저장됐어요");
       }
       router.back();
     } catch {
-      showToast("수정하지 못했어요. 잠시 후 다시 시도해 주세요");
+      showToast("저장 중 문제가 생겼어요. 잠시 후 다시 시도해주세요");
     } finally {
       setSubmitting(false);
     }
   };
-  const handleDiscard = () => {
+
+  const handleDiscardAndExit = () => {
     setSaveModalVisible(false);
     router.back();
   };
@@ -387,6 +375,7 @@ function DetailEditor({
 
       {/* ── Content ── */}
       <ScrollView
+        style={styles.scroll}
         showsVerticalScrollIndicator={false}
         contentContainerStyle={styles.scrollContent}
         keyboardShouldPersistTaps="handled"
@@ -438,6 +427,7 @@ function DetailEditor({
             ingredientId={masterIngredientId}
             storage={storage}
             purchaseDate={purchaseDate}
+            expirationDate={expirationDate}
             onPick={setExpirationDate}
           />
 
@@ -446,20 +436,52 @@ function DetailEditor({
             value={expirationDate}
             onChange={setExpirationDate}
             suffix="까지"
-            disabled={isFrozen}
-            disabledText="무제한 (냉동)"
           />
 
         </View>
 
       </ScrollView>
 
-      {/* ── Save Confirm Modal ── */}
+      {/* ── Bottom-fixed save action ── */}
+      <View
+        style={[
+          styles.saveBtnArea,
+          { paddingBottom: Math.max(insets.bottom, Spacing.md) },
+        ]}
+      >
+        <Pressable
+          onPress={handleSaveAndExit}
+          disabled={!isDirty || submitting}
+          accessibilityRole="button"
+          accessibilityLabel="수정 완료"
+          accessibilityState={{ disabled: !isDirty || submitting }}
+          style={({ pressed }) => [
+            styles.saveBtn,
+            isDirty && !submitting
+              ? styles.saveBtnActive
+              : styles.saveBtnDisabled,
+            pressed && isDirty && !submitting && { opacity: 0.9 },
+          ]}
+        >
+          <Text
+            style={[
+              styles.saveBtnText,
+              (!isDirty || submitting) && styles.saveBtnTextDisabled,
+            ]}
+          >
+            수정 완료
+          </Text>
+        </Pressable>
+      </View>
+
+      {/* ── Unsaved-changes Modal — surfaces on back when there are pending edits ── */}
       <ConfirmModal
         visible={saveModalVisible}
-        message="수정하시겠습니까?"
-        onConfirm={handleConfirmSave}
-        onCancel={handleDiscard}
+        title="변경사항이 사라져요"
+        confirmLabel="저장하기"
+        cancelLabel="나가기"
+        onConfirm={handleSaveAndExit}
+        onCancel={handleDiscardAndExit}
       />
 
       {/* ── Delete Confirm Modal ── */}
@@ -527,10 +549,45 @@ const styles = StyleSheet.create({
     color: Colors.onSurface,
   },
 
-  // Scroll
+  // Scroll — flex:1 so the save-action area sticks to the bottom even when
+  // content is short. ScrollView fills the gap between header and save area.
+  scroll: {
+    flex: 1,
+  },
   scrollContent: {
     paddingHorizontal: Spacing.xl,
-    paddingBottom: 48,
+    paddingBottom: Spacing.xl,
+  },
+
+  // ── Bottom save action ──
+  // Normal-flow last child of the screen (not absolute) so the ScrollView
+  // above can flex into the remaining space without an explicit bottom-pad.
+  saveBtnArea: {
+    paddingHorizontal: Spacing.xl,
+    paddingTop: Spacing.md,
+    backgroundColor: Colors.surface,
+  },
+  saveBtn: {
+    height: 56,
+    borderRadius: Radius.xl,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  saveBtnActive: {
+    backgroundColor: Colors.primary,
+    ...Shadows.fab,
+  },
+  saveBtnDisabled: {
+    backgroundColor: Colors.surfaceContainerHigh,
+  },
+  saveBtnText: {
+    fontSize: FontSize.bodyLg,
+    fontWeight: FontWeight.bold,
+    color: Colors.onPrimary,
+    letterSpacing: LetterSpacing.tight,
+  },
+  saveBtnTextDisabled: {
+    color: Colors.outline,
   },
 
   // Hero

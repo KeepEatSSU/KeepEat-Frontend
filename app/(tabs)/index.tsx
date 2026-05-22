@@ -1,49 +1,53 @@
-import { useState, useEffect, useMemo, useRef, useCallback } from "react";
+import { AppHeaderLogo } from "@/components/AppHeaderLogo";
+import { AppHeaderRight } from "@/components/AppHeaderRight";
 import {
-  View,
-  Text,
-  ScrollView,
-  Pressable,
-  TextInput,
-  ActivityIndicator,
-  Dimensions,
-  StyleSheet,
-  Keyboard,
-} from "react-native";
-import Animated, {
-  FadeIn,
-  FadeOut,
-  FadeInDown,
-  FadeOutDown,
-} from "react-native-reanimated";
-import * as Haptics from "expo-haptics";
-import { useRouter, useFocusEffect } from "expo-router";
-import { useSafeAreaInsets } from "react-native-safe-area-context";
-import { Ionicons } from "@expo/vector-icons";
-import { ProfileModal } from "@/components/ProfileModal";
+  AppSearchChipsHeader,
+  type ChipConfig,
+} from "@/components/AppSearchChipsHeader";
 import { ErrorScreen } from "@/components/ErrorScreen";
 import { useToast } from "@/components/Toast";
-import { useAuth } from "@/context/AuthContext";
-import {
-  Colors,
-  Spacing,
-  FontSize,
-  FontWeight,
-  Radius,
-  LetterSpacing,
-  Shadows,
-} from "@/constants/theme";
 import {
   FRIDGE_FILTER_CHIPS,
   type Ingredient,
   type StorageType,
 } from "@/constants/domain";
 import {
+  Colors,
+  FontSize,
+  FontWeight,
+  LetterSpacing,
+  Radius,
+  Shadows,
+  Spacing,
+} from "@/constants/theme";
+import {
+  deleteIngredient,
   fetchAllIngredients,
   searchIngredients,
-  deleteIngredient,
 } from "@/services/userIngredients";
 import { getDDayInfo } from "@/utils/dateUtils";
+import { Ionicons } from "@expo/vector-icons";
+import * as Haptics from "expo-haptics";
+import { useFocusEffect, useRouter } from "expo-router";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import {
+  ActivityIndicator,
+  Dimensions,
+  Keyboard,
+  Pressable,
+  ScrollView,
+  StyleSheet,
+  Text,
+  TextInput,
+  View,
+} from "react-native";
+import Animated, {
+  FadeIn,
+  FadeInDown,
+  FadeOut,
+  FadeOutDown,
+} from "react-native-reanimated";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -62,10 +66,11 @@ function getDDayBadgeColor(status: string): string {
 
 // ─── Grid Card ────────────────────────────────────────────────────────────────
 
+const SCREEN_WIDTH = Dimensions.get("window").width;
+
 const GRID_GAP = Spacing.md;
 const GRID_PADDING = Spacing.xl;
-const CARD_WIDTH =
-  (Dimensions.get("window").width - GRID_PADDING * 2 - GRID_GAP) / 2;
+const CARD_WIDTH = (SCREEN_WIDTH - GRID_PADDING * 2 - GRID_GAP) / 2;
 
 
 const STORAGE_CHIP_STYLE: Record<
@@ -260,7 +265,6 @@ const gridStyles = StyleSheet.create({
 export default function FridgeScreen() {
   const router = useRouter();
   const insets = useSafeAreaInsets();
-  const { logout } = useAuth();
   const { showToast } = useToast();
 
   // ── Async data state ──
@@ -275,7 +279,6 @@ export default function FridgeScreen() {
   const [selectedFilter, setSelectedFilter] = useState("전체");
   const [searchQuery, setSearchQuery] = useState("");
   const [categoryExpanded, setCategoryExpanded] = useState(false);
-  const [profileVisible, setProfileVisible] = useState(false);
 
   // ── Search focus + select-mode state ──
   const [isSearchFocused, setIsSearchFocused] = useState(false);
@@ -369,6 +372,49 @@ export default function FridgeScreen() {
   // The list shown to the user — server-search results take precedence over
   // the full list when the user has typed something.
   const displayedIngredients = searchResults ?? ingredients;
+
+  // Chip list for the search-and-chips header. Memoized so the chip array
+  // identity is stable across re-renders triggered by unrelated state.
+  const fridgeChips = useMemo<ChipConfig[]>(() => {
+    const hasSelectedSubcategory = categories.some(
+      (c) => c.type === "category" && c.label === selectedFilter,
+    );
+    const triggerSelected = categoryExpanded || hasSelectedSubcategory;
+
+    const standard: ChipConfig[] = categories
+      .filter((c) => c.type === "all" || c.type === "storageType")
+      .map((cat) => ({
+        key: cat.id,
+        label: cat.label,
+        isSelected: selectedFilter === cat.label && !categoryExpanded,
+        onPress: () => {
+          setCategoryExpanded(false);
+          setSelectedFilter(cat.label);
+        },
+      }));
+
+    const trigger: ChipConfig = {
+      key: "category-trigger",
+      label:
+        !categoryExpanded && hasSelectedSubcategory
+          ? selectedFilter
+          : "상세 카테고리",
+      isSelected: triggerSelected,
+      onPress: () => setCategoryExpanded((v) => !v),
+      variant: "trigger",
+      trailingIcon: (
+        <Ionicons
+          name={categoryExpanded ? "chevron-up" : "grid-outline"}
+          size={14}
+          color={
+            triggerSelected ? Colors.onPrimary : Colors.onSurfaceVariant
+          }
+        />
+      ),
+    };
+
+    return [...standard, trigger];
+  }, [categories, selectedFilter, categoryExpanded]);
 
   // ── Filtered ingredients (category/storage chip applied to base list) ──
   const filteredIngredients = useMemo(() => {
@@ -469,23 +515,9 @@ export default function FridgeScreen() {
       {/* Header */}
       <View style={styles.header}>
         <View style={styles.headerLeft}>
-          <Ionicons
-            name="leaf"
-            size={20}
-            color={Colors.primaryContainer}
-            style={{ marginRight: 6 }}
-          />
-          <Text style={styles.appTitle}>KeepEat</Text>
+          <AppHeaderLogo />
         </View>
-        <Pressable
-          onPress={() => setProfileVisible(true)}
-          style={({ pressed }) => [
-            styles.avatar,
-            pressed && { opacity: 0.6 },
-          ]}
-        >
-          <Ionicons name="person" size={16} color={Colors.onSurfaceVariant} />
-        </Pressable>
+        <AppHeaderRight />
       </View>
 
       {isLoading ? (
@@ -496,241 +528,133 @@ export default function FridgeScreen() {
         </View>
       ) : (
         <View style={styles.contentArea}>
-          {/* Search Bar + 3-state action button (Row) */}
-          <View style={styles.searchRow}>
-            <View style={styles.searchBar}>
-              <Ionicons
-                name="search"
-                size={18}
-                color={Colors.onSurfaceVariant}
-                style={{ marginRight: Spacing.sm }}
-              />
-              <TextInput
-                ref={searchInputRef}
-                value={searchQuery}
-                onChangeText={setSearchQuery}
-                onFocus={handleSearchFocus}
-                onBlur={handleSearchBlur}
-                placeholder="식재료 검색"
-                placeholderTextColor={Colors.outline}
-                style={styles.searchInput}
-                returnKeyType="search"
-                autoCorrect={false}
-                editable={!selectMode}
-              />
-              {isSearchFocused && searchQuery.length > 0 && (
-                <Pressable
-                  onPress={() => setSearchQuery("")}
-                  accessibilityLabel="검색어 지우기"
-                >
-                  <Ionicons
-                    name="close-circle"
-                    size={18}
-                    color={Colors.onSurfaceVariant}
-                  />
-                </Pressable>
-              )}
-            </View>
-
-            {/*
-              Axis A: selectMode off ↔ on
-                → Same slot, same width, only text + background color swap.
-              Axis B: search unfocused ↔ focused
-                → Right button fully unmounts (fade/slide out), search bar
-                  flex-expands to absorb the space, external "취소" text slot
-                  fades in. selectMode is gated by editable={!selectMode} so
-                  the two axes never overlap.
-            */}
-            {!isSearchFocused && (
-              <Animated.View
-                key="select-slot"
-                entering={FadeIn.duration(200)}
-                exiting={FadeOut.duration(180)}
-                style={styles.selectBtnSlot}
-              >
-                <Pressable
-                  onPress={handleToggleSelectMode}
-                  accessibilityRole="button"
-                  accessibilityLabel={
-                    selectMode ? "선택 모드 취소" : "선택 모드 진입"
-                  }
-                  style={({ pressed }) => [
-                    styles.selectBtn,
-                    selectMode && styles.selectBtnActive,
-                    pressed && { opacity: 0.75 },
-                  ]}
-                >
-                  <Text
-                    style={[
-                      styles.selectBtnText,
-                      selectMode && styles.selectBtnTextActive,
-                    ]}
+          <AppSearchChipsHeader
+            searchPlaceholder="식재료 검색"
+            searchValue={searchQuery}
+            onSearchChange={setSearchQuery}
+            searchInputRef={searchInputRef}
+            onSearchFocus={handleSearchFocus}
+            onSearchBlur={handleSearchBlur}
+            searchEditable={!selectMode}
+            chips={fridgeChips}
+            searchRightSlot={
+              <>
+                {/*
+                  Axis A: selectMode off ↔ on
+                    → Same slot, same width, only text + bg color swap.
+                  Axis B: search unfocused ↔ focused
+                    → Right button unmounts; "취소" text slot fades in.
+                    selectMode is gated by `searchEditable={!selectMode}` so
+                    the two axes never overlap.
+                */}
+                {!isSearchFocused && (
+                  <Animated.View
+                    key="select-slot"
+                    entering={FadeIn.duration(200)}
+                    exiting={FadeOut.duration(180)}
+                    style={styles.selectBtnSlot}
                   >
-                    {selectMode ? "취소" : "선택"}
-                  </Text>
-                </Pressable>
-              </Animated.View>
-            )}
-
-            {isSearchFocused && (
-              <Animated.View
-                key="cancel-slot"
-                entering={FadeIn.duration(200)}
-                exiting={FadeOut.duration(140)}
-                style={styles.cancelSlot}
-              >
-                <Pressable
-                  onPress={handleCancelSearch}
-                  accessibilityRole="button"
-                  accessibilityLabel="검색 취소"
-                  style={({ pressed }) => [
-                    styles.cancelTextBtn,
-                    pressed && { opacity: 0.6 },
-                  ]}
-                >
-                  <Text style={styles.cancelTextBtnText}>취소</Text>
-                </Pressable>
-              </Animated.View>
-            )}
-          </View>
-
-          {/* Filter Chips: 전체/실온/냉장/냉동 + 상세 카테고리 토글 */}
-          <ScrollView
-            horizontal
-            showsHorizontalScrollIndicator={false}
-            contentContainerStyle={styles.chipsContent}
-            style={styles.chipsScroll}
-          >
-            {categories
-              .filter((c) => c.type === "all" || c.type === "storageType")
-              .map((cat) => {
-                const isSelected =
-                  selectedFilter === cat.label && !categoryExpanded;
-                return (
-                  <Pressable
-                    key={cat.id}
-                    onPress={() => {
-                      setCategoryExpanded(false);
-                      setSelectedFilter(cat.label);
-                    }}
-                    style={[styles.chip, isSelected && styles.chipSelected]}
-                  >
-                    <Text
-                      style={[
-                        styles.chipText,
-                        isSelected && styles.chipTextSelected,
-                      ]}
-                    >
-                      {cat.label}
-                    </Text>
-                  </Pressable>
-                );
-              })}
-            {/* Expand/collapse toggle for detail categories */}
-            <Pressable
-              onPress={() => setCategoryExpanded((v) => !v)}
-              style={[
-                styles.chip,
-                styles.chipCategoryTrigger,
-                (categoryExpanded ||
-                  categories.some(
-                    (c) =>
-                      c.type === "category" && c.label === selectedFilter,
-                  )) &&
-                  styles.chipSelected,
-              ]}
-            >
-              <Ionicons
-                name={categoryExpanded ? "chevron-up" : "grid-outline"}
-                size={14}
-                color={
-                  categoryExpanded ||
-                  categories.some(
-                    (c) =>
-                      c.type === "category" && c.label === selectedFilter,
-                  )
-                    ? Colors.onPrimary
-                    : Colors.onSurfaceVariant
-                }
-                style={{ marginRight: 4 }}
-              />
-              <Text
-                style={[
-                  styles.chipText,
-                  (categoryExpanded ||
-                    categories.some(
-                      (c) =>
-                        c.type === "category" && c.label === selectedFilter,
-                    )) &&
-                    styles.chipTextSelected,
-                ]}
-                numberOfLines={1}
-              >
-                {!categoryExpanded &&
-                categories.some(
-                  (c) =>
-                    c.type === "category" && c.label === selectedFilter,
-                )
-                  ? selectedFilter
-                  : "상세 카테고리"}
-              </Text>
-            </Pressable>
-          </ScrollView>
-
-          {/* Expanded category chips (inline wrap) */}
-          {categoryExpanded && (
-            <View style={styles.expandedArea}>
-              {categories
-                .filter((c) => c.type === "category")
-                .map((cat) => {
-                  const count = categoryCounts[cat.label] ?? 0;
-                  const hasItems = count > 0;
-                  const isSelected = selectedFilter === cat.label;
-
-                  return (
                     <Pressable
-                      key={cat.id}
-                      onPress={() => {
-                        setSelectedFilter(cat.label);
-                        setCategoryExpanded(false);
-                      }}
-                      style={[
-                        styles.expandedChip,
-                        isSelected && styles.chipSelected,
-                        !hasItems && styles.expandedChipEmpty,
+                      onPress={handleToggleSelectMode}
+                      accessibilityRole="button"
+                      accessibilityLabel={
+                        selectMode ? "선택 모드 취소" : "선택 모드 진입"
+                      }
+                      style={({ pressed }) => [
+                        styles.selectBtn,
+                        selectMode && styles.selectBtnActive,
+                        pressed && { opacity: 0.75 },
                       ]}
                     >
                       <Text
                         style={[
-                          styles.expandedChipText,
-                          isSelected && styles.chipTextSelected,
-                          !hasItems && styles.expandedChipTextEmpty,
+                          styles.selectBtnText,
+                          selectMode && styles.selectBtnTextActive,
                         ]}
                       >
-                        {cat.label}
+                        {selectMode ? "취소" : "선택"}
                       </Text>
-                      {hasItems && (
-                        <View
+                    </Pressable>
+                  </Animated.View>
+                )}
+                {isSearchFocused && (
+                  <Animated.View
+                    key="cancel-slot"
+                    entering={FadeIn.duration(200)}
+                    exiting={FadeOut.duration(140)}
+                    style={styles.cancelSlot}
+                  >
+                    <Pressable
+                      onPress={handleCancelSearch}
+                      accessibilityRole="button"
+                      accessibilityLabel="검색 취소"
+                      style={({ pressed }) => [
+                        styles.cancelTextBtn,
+                        pressed && { opacity: 0.6 },
+                      ]}
+                    >
+                      <Text style={styles.cancelTextBtnText}>취소</Text>
+                    </Pressable>
+                  </Animated.View>
+                )}
+              </>
+            }
+            belowChipsSlot={
+              categoryExpanded ? (
+                <View style={styles.expandedArea}>
+                  {categories
+                    .filter((c) => c.type === "category")
+                    .map((cat) => {
+                      const count = categoryCounts[cat.label] ?? 0;
+                      const hasItems = count > 0;
+                      const isSelected = selectedFilter === cat.label;
+
+                      return (
+                        <Pressable
+                          key={cat.id}
+                          onPress={() => {
+                            setSelectedFilter(cat.label);
+                            setCategoryExpanded(false);
+                          }}
                           style={[
-                            styles.chipBadge,
-                            isSelected && styles.chipBadgeSelected,
+                            styles.expandedChip,
+                            isSelected && styles.expandedChipSelected,
+                            !hasItems && styles.expandedChipEmpty,
                           ]}
                         >
                           <Text
                             style={[
-                              styles.chipBadgeText,
-                              isSelected && styles.chipBadgeTextSelected,
+                              styles.expandedChipText,
+                              isSelected && styles.expandedChipTextSelected,
+                              !hasItems && styles.expandedChipTextEmpty,
                             ]}
                           >
-                            {count}
+                            {cat.label}
                           </Text>
-                        </View>
-                      )}
-                    </Pressable>
-                  );
-                })}
-            </View>
-          )}
+                          {hasItems && (
+                            <View
+                              style={[
+                                styles.chipBadge,
+                                isSelected && styles.chipBadgeSelected,
+                              ]}
+                            >
+                              <Text
+                                style={[
+                                  styles.chipBadgeText,
+                                  isSelected && styles.chipBadgeTextSelected,
+                                ]}
+                              >
+                                {count}
+                              </Text>
+                            </View>
+                          )}
+                        </Pressable>
+                      );
+                    })}
+                </View>
+              ) : undefined
+            }
+          />
 
           {/* Ingredient Grid or Empty State */}
           {filteredIngredients.length > 0 ? (
@@ -817,18 +741,6 @@ export default function FridgeScreen() {
         </Animated.View>
       )}
 
-      <ProfileModal
-        visible={profileVisible}
-        onClose={() => setProfileVisible(false)}
-        onLogout={async () => {
-          setProfileVisible(false);
-          await logout();
-        }}
-        onDeleteAccount={() => {
-          setProfileVisible(false);
-          // TODO: delete account logic
-        }}
-      />
     </View>
   );
 }
@@ -854,51 +766,12 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     alignItems: "center",
   },
-  appTitle: {
-    fontSize: FontSize.titleLg,
-    fontWeight: FontWeight.bold,
-    color: Colors.primary,
-    letterSpacing: LetterSpacing.tight,
-  },
-  avatar: {
-    width: 40,
-    height: 40,
-    borderRadius: Radius.full,
-    backgroundColor: Colors.surfaceContainerHigh,
-    alignItems: "center",
-    justifyContent: "center",
-  },
 
   // Content area (below header, when loaded)
   contentArea: {
     flex: 1,
   },
 
-  // Search Bar + Select Button Row
-  searchRow: {
-    flexDirection: "row",
-    alignItems: "center",
-    paddingHorizontal: Spacing.xl,
-    marginBottom: Spacing.md,
-  },
-  searchBar: {
-    flex: 1,
-    flexDirection: "row",
-    alignItems: "center",
-    backgroundColor: Colors.surfaceContainerLow,
-    borderRadius: Radius.full,
-    paddingHorizontal: Spacing.base,
-    paddingVertical: Spacing.md,
-    minHeight: 44,
-  },
-  searchInput: {
-    flex: 1,
-    fontSize: FontSize.bodyMd,
-    fontWeight: FontWeight.medium,
-    color: Colors.onSurface,
-    padding: 0,
-    margin: 0,
-  },
   // Axis A slot — holds the select/cancel pill when search is not focused.
   // Fixed width via pill padding keeps the search bar's flex width identical
   // whether selectMode is off or on (선택 ↔ 취소 = color swap only).
@@ -1012,44 +885,8 @@ const styles = StyleSheet.create({
     color: Colors.onSurfaceVariant,
   },
 
-  // Filter Chips
-  chipsScroll: {
-    flexGrow: 0,
-    height: 52,
-    marginBottom: Spacing.lg,
-  },
-  chipsContent: {
-    paddingHorizontal: Spacing.xl,
-    gap: Spacing.sm,
-    alignItems: "center",
-  },
-  chip: {
-    height: 36,
-    paddingHorizontal: Spacing.base,
-    justifyContent: "center",
-    alignItems: "center",
-    backgroundColor: Colors.surfaceContainerHigh,
-    borderRadius: Radius.md,
-  },
-  chipSelected: {
-    backgroundColor: Colors.primary,
-  },
-  chipCategoryTrigger: {
-    flexDirection: "row",
-    paddingHorizontal: Spacing.md,
-    gap: 0,
-  },
-  chipText: {
-    fontSize: FontSize.bodySm,
-    lineHeight: 20,
-    fontWeight: FontWeight.semiBold,
-    color: Colors.onSurfaceVariant,
-  },
-  chipTextSelected: {
-    color: Colors.onPrimary,
-  },
-
-  // Expanded category area (inline wrap)
+  // Expanded category area (inline wrap, rendered via AppSearchChipsHeader's
+  // belowChipsSlot when the user expands the trigger chip).
   expandedArea: {
     flexDirection: "row",
     flexWrap: "wrap",
@@ -1066,6 +903,9 @@ const styles = StyleSheet.create({
     borderRadius: Radius.md,
     gap: Spacing.xs,
   },
+  expandedChipSelected: {
+    backgroundColor: Colors.primary,
+  },
   expandedChipEmpty: {
     opacity: 0.45,
   },
@@ -1074,6 +914,9 @@ const styles = StyleSheet.create({
     lineHeight: 18,
     fontWeight: FontWeight.semiBold,
     color: Colors.onSurfaceVariant,
+  },
+  expandedChipTextSelected: {
+    color: Colors.onPrimary,
   },
   expandedChipTextEmpty: {
     color: Colors.outline,

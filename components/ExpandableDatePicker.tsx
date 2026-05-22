@@ -79,7 +79,6 @@ function startOfToday(): Date {
 
 const QUICK_ACTIONS: { key: string; label: string; delta: number | "today" }[] =
   [
-    { key: "minus7", label: "-7일", delta: -7 },
     { key: "minus1", label: "-1일", delta: -1 },
     { key: "today", label: "오늘", delta: "today" },
     { key: "plus1", label: "+1일", delta: 1 },
