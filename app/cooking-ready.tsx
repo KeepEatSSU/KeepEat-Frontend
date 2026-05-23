@@ -1,13 +1,14 @@
-import { useState, useMemo } from "react";
+import { useEffect, useMemo, useState } from "react";
 import {
-  View,
-  Text,
-  ScrollView,
-  Pressable,
+  ActivityIndicator,
   Platform,
+  Pressable,
+  ScrollView,
   StyleSheet,
+  Text,
+  View,
 } from "react-native";
-import { useRouter, useLocalSearchParams } from "expo-router";
+import { useLocalSearchParams, useRouter } from "expo-router";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { Ionicons } from "@expo/vector-icons";
 import { LinearGradient } from "expo-linear-gradient";
@@ -21,14 +22,10 @@ import {
   PrimaryGradient,
   LetterSpacing,
 } from "@/constants/theme";
-import { MOCK_RECIPE_DETAILS } from "@/mocks";
 import { ConfirmModal } from "@/components/ConfirmModal";
-
-// ─── Helpers ──────────────────────────────────────────────────────────────────
-
-function formatAmount(n: number): string {
-  return n % 1 === 0 ? String(n) : n.toFixed(1);
-}
+import { ErrorScreen } from "@/components/ErrorScreen";
+import { getRecipeDetail, type RecipeDetailDto } from "@/services/recipes";
+import { getOwnedIngredientsByRecipe } from "@/services/userIngredients";
 
 // ─── Screen ───────────────────────────────────────────────────────────────────
 
@@ -36,17 +33,79 @@ export default function CookingReadyScreen() {
   const router = useRouter();
   const insets = useSafeAreaInsets();
   const { id } = useLocalSearchParams<{ id: string }>();
+  const recipeId = Number(id);
 
-  const recipe = useMemo(
-    () => MOCK_RECIPE_DETAILS.find((r) => r.id === id) ?? MOCK_RECIPE_DETAILS[0],
-    [id],
-  );
+  const [recipe, setRecipe] = useState<RecipeDetailDto | null>(null);
+  // Names from `/by-recipe` — authoritative source for the owned/missing
+  // split, more reliable than the DTO's per-ingredient `isOwned` flag.
+  const [ownedNames, setOwnedNames] = useState<Set<string>>(new Set());
+  const [isLoading, setIsLoading] = useState(true);
+  const [isError, setIsError] = useState(false);
 
   const [portions, setPortions] = useState(1);
   const [exitModalVisible, setExitModalVisible] = useState(false);
 
-  const owned = recipe.ingredients.filter((i) => i.isOwned !== false);
-  const missing = recipe.ingredients.filter((i) => i.isOwned === false);
+  useEffect(() => {
+    if (!id || Number.isNaN(recipeId)) {
+      setIsError(true);
+      setIsLoading(false);
+      return;
+    }
+    let cancelled = false;
+    (async () => {
+      try {
+        const [detail, owned] = await Promise.all([
+          getRecipeDetail(recipeId),
+          getOwnedIngredientsByRecipe(recipeId).catch(() => []),
+        ]);
+        if (cancelled) return;
+        setRecipe(detail);
+        setOwnedNames(new Set(owned.map((o) => o.name)));
+        setIsError(false);
+      } catch {
+        if (!cancelled) setIsError(true);
+      } finally {
+        if (!cancelled) setIsLoading(false);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [id, recipeId]);
+
+  const { owned, missing } = useMemo(() => {
+    if (!recipe) return { owned: [], missing: [] };
+    const all = recipe.requiredIngredients ?? [];
+    return {
+      owned: all.filter((i) => ownedNames.has(i.name)),
+      missing: all.filter((i) => !ownedNames.has(i.name)),
+    };
+  }, [recipe, ownedNames]);
+
+  if (isError) {
+    return (
+      <ErrorScreen
+        message="레시피 정보를 불러오지 못했어요"
+        subMessage="잠시 후 다시 시도해 주세요"
+        buttonLabel="이전으로 돌아가기"
+        onPressHome={() => router.back()}
+      />
+    );
+  }
+
+  if (isLoading || !recipe) {
+    return (
+      <View
+        style={[
+          styles.screen,
+          styles.centered,
+          { paddingTop: insets.top },
+        ]}
+      >
+        <ActivityIndicator size="large" color={Colors.primary} />
+      </View>
+    );
+  }
 
   return (
     <View style={[styles.screen, { paddingTop: insets.top }]}>
@@ -155,7 +214,7 @@ export default function CookingReadyScreen() {
           onPress={() =>
             router.push({
               pathname: "/cooking-step",
-              params: { id: recipe.id },
+              params: { id: String(recipeId) },
             } as never)
           }
           style={({ pressed }) => [
@@ -200,6 +259,10 @@ const styles = StyleSheet.create({
   screen: {
     flex: 1,
     backgroundColor: COOKING_BG,
+  },
+  centered: {
+    alignItems: "center",
+    justifyContent: "center",
   },
   bgCircleTopRight: {
     position: "absolute",

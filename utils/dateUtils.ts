@@ -84,6 +84,18 @@ export function getDDayInfo(
 }
 
 /**
+ * Format a "YYYY-MM-DD" ISO date as the Korean "M월 D일" short form.
+ * Returns the input untouched when the shape doesn't match — defensive
+ * fallback for whatever the backend might send (or omit).
+ */
+export function formatKoreanShortDate(iso?: string): string {
+  if (!iso) return "";
+  const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(iso);
+  if (!m) return iso;
+  return `${Number(m[2])}월 ${Number(m[3])}일`;
+}
+
+/**
  * Render a day count in the most readable Korean unit, prefixed with "약"
  * once the unit is no longer days (because rounding has happened).
  *

@@ -32,7 +32,8 @@
         "android.permission.RECORD_AUDIO"
       ],
       "package": "com.anonymous.keepeat_front",
-      "googleServicesFile": "./google-services.json"
+      "googleServicesFile": "./google-services.json",
+      "usesCleartextTraffic": true
     },
     "web": {
       "output": "static",

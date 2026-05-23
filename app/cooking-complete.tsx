@@ -1,12 +1,13 @@
-import { useState, useMemo, useRef } from "react";
+import { useState, useEffect, useRef } from "react";
 import {
-  View,
-  Text,
-  ScrollView,
-  Pressable,
-  Platform,
-  StyleSheet,
+  ActivityIndicator,
   Dimensions,
+  Platform,
+  Pressable,
+  ScrollView,
+  StyleSheet,
+  Text,
+  View,
 } from "react-native";
 import { useRouter, useLocalSearchParams } from "expo-router";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
@@ -22,9 +23,35 @@ import {
   Shadows,
   LetterSpacing,
 } from "@/constants/theme";
-import type { RecipeIngredient } from "@/constants/domain";
-import { MOCK_RECIPE_DETAILS } from "@/mocks";
+import { ErrorScreen } from "@/components/ErrorScreen";
 import { useToast } from "@/components/Toast";
+import { getErrorMessage } from "@/services/api";
+import { completeCooking, getRecipeDetail } from "@/services/recipes";
+import {
+  deleteUserIngredients,
+  getOwnedIngredientsByRecipe,
+  type OwnedRecipeIngredientDto,
+} from "@/services/userIngredients";
+import { formatKoreanShortDate } from "@/utils/dateUtils";
+
+// ─── Helpers ──────────────────────────────────────────────────────────────────
+
+const STORAGE_CHIP: Record<
+  NonNullable<OwnedRecipeIngredientDto["storageType"]>,
+  { bg: string; text: string; label: string }
+> = {
+  냉장: { bg: "#E8F5E9", text: "#166534", label: "냉장" },
+  냉동: { bg: "#E0F2FE", text: "#0369A1", label: "냉동" },
+  실온: { bg: "#F5F5F4", text: "#44403C", label: "실온" },
+};
+
+/** 남은 일자를 사람이 읽는 문자열로. 0/1은 임박 강조용. */
+function formatDaysLeft(daysLeft: number): string {
+  if (daysLeft === 0) return "오늘 만료";
+  if (daysLeft === 1) return "내일 만료";
+  if (daysLeft > 0) return `${daysLeft}일 남음`;
+  return `${Math.abs(daysLeft)}일 지남`;
+}
 
 // ─── Screen ───────────────────────────────────────────────────────────────────
 
@@ -34,41 +61,90 @@ export default function CookingCompleteScreen() {
   const insets = useSafeAreaInsets();
   const { showToast } = useToast();
   const { id } = useLocalSearchParams<{ id: string }>();
+  const recipeId = Number(id);
 
-  const recipe = useMemo(
-    () => MOCK_RECIPE_DETAILS.find((r) => r.id === id) ?? MOCK_RECIPE_DETAILS[0],
-    [id],
+  const [title, setTitle] = useState<string>("");
+  const [ingredients, setIngredients] = useState<OwnedRecipeIngredientDto[]>(
+    [],
   );
+  const [isLoading, setIsLoading] = useState(true);
+  const [isError, setIsError] = useState(false);
 
-  // Only show owned ingredients (user actually had them)
-  const ingredients = recipe.ingredients.filter((i) => i.isOwned !== false);
-
-  const [selected, setSelected] = useState<Set<string>>(() => new Set());
+  // Selected keyed by user-ingredient id (not name) so the bulk delete call
+  // can reference rows directly. Entries without a backend id are filtered
+  // out at delete time — they can still be toggled visually.
+  const [selectedIds, setSelectedIds] = useState<Set<number>>(
+    () => new Set(),
+  );
+  const [submitting, setSubmitting] = useState(false);
   const [showConfetti, setShowConfetti] = useState(false);
   const confettiRef = useRef<ConfettiCannon>(null);
 
-  const toggleItem = (name: string) => {
-    setSelected((prev) => {
-      const next = new Set(prev);
-      if (next.has(name)) {
-        next.delete(name);
-      } else {
-        next.add(name);
+  useEffect(() => {
+    if (!id || Number.isNaN(recipeId)) {
+      setIsError(true);
+      setIsLoading(false);
+      return;
+    }
+    let cancelled = false;
+    (async () => {
+      try {
+        const [detail, owned] = await Promise.all([
+          getRecipeDetail(recipeId),
+          getOwnedIngredientsByRecipe(recipeId).catch(() => []),
+        ]);
+        if (cancelled) return;
+        setTitle(detail.recipeName);
+        setIngredients(owned);
+        setIsError(false);
+      } catch {
+        if (!cancelled) setIsError(true);
+      } finally {
+        if (!cancelled) setIsLoading(false);
       }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [id, recipeId]);
+
+  const toggleItem = (itemId: number) => {
+    setSelectedIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(itemId)) next.delete(itemId);
+      else next.add(itemId);
       return next;
     });
   };
 
-  const handleComplete = () => {
-    // Fire confetti
+  const handleComplete = async () => {
+    if (submitting) return;
+    setSubmitting(true);
+
+    // Fire confetti immediately — visual reward before API resolves.
     setShowConfetti(true);
     confettiRef.current?.start();
 
-    // TODO: delete selected ingredients from fridge state/DB
-    const deletedNames = Array.from(selected);
-    console.log("Deleting from fridge:", deletedNames);
+    // 1) Record the cook (best-effort; failure surfaces a toast but doesn't
+    //    block the rest of the flow).
+    try {
+      await completeCooking(recipeId);
+    } catch (e) {
+      showToast(getErrorMessage(e, "요리 기록 저장에 실패했어요"));
+    }
 
-    // Delayed navigation to home
+    // 2) Delete the selected fridge items. Skip silently when nothing was
+    //    chosen so the user can finish without managing the fridge.
+    const deleteIds = Array.from(selectedIds);
+    if (deleteIds.length > 0) {
+      try {
+        await deleteUserIngredients(deleteIds);
+      } catch (e) {
+        showToast(getErrorMessage(e, "재료 삭제에 실패했어요"));
+      }
+    }
+
+    // 3) Tail-end UX: toast + reset to tabs.
     setTimeout(() => {
       showToast("맛있는 식사 되세요!");
       navigation.dispatch(
@@ -79,6 +155,27 @@ export default function CookingCompleteScreen() {
       );
     }, 1800);
   };
+
+  if (isError) {
+    return (
+      <ErrorScreen
+        message="레시피 정보를 불러오지 못했어요"
+        subMessage="잠시 후 다시 시도해 주세요"
+        buttonLabel="이전으로 돌아가기"
+        onPressHome={() => router.back()}
+      />
+    );
+  }
+
+  if (isLoading) {
+    return (
+      <View
+        style={[styles.screen, styles.centered, { paddingTop: insets.top }]}
+      >
+        <ActivityIndicator size="large" color={Colors.primary} />
+      </View>
+    );
+  }
 
   return (
     <View style={[styles.screen, { paddingTop: insets.top }]}>
@@ -106,9 +203,7 @@ export default function CookingCompleteScreen() {
           <Text style={styles.heroTitle}>
             고생하셨어요!
           </Text>
-          <Text style={styles.heroSubtitle}>
-            {recipe.title} 완성입니다
-          </Text>
+          <Text style={styles.heroSubtitle}>{title} 완성입니다</Text>
         </View>
 
         {/* ── Section Label ── */}
@@ -119,42 +214,102 @@ export default function CookingCompleteScreen() {
           선택한 재료는 냉장고에서 비워집니다
         </Text>
 
-        {/* ── Toggle Cards ── */}
+        {/* ── Toggle Cards ──
+            Row 1: [check] [name] [customName?] [storage chip]
+            Row 2: "M월 D일 구매 · X일 남음" (daysLeft ≤ 1 → red) */}
         <View style={styles.cardList}>
           {ingredients.map((item) => {
-            const isSelected = selected.has(item.name);
+            const isSelected = selectedIds.has(item.id);
+            const storageStyle = item.storageType
+              ? STORAGE_CHIP[item.storageType]
+              : null;
+            const hasNickname =
+              !!item.customName && item.customName !== item.name;
+            const showDaysLeft = typeof item.daysLeft === "number";
+            const urgent = showDaysLeft && (item.daysLeft as number) <= 1;
+            const purchaseText = item.purchaseDate
+              ? `${formatKoreanShortDate(item.purchaseDate)} 구매`
+              : "";
+
             return (
               <Pressable
-                key={item.name}
-                onPress={() => toggleItem(item.name)}
+                key={item.id}
+                onPress={() => toggleItem(item.id)}
                 style={[
                   styles.toggleCard,
                   isSelected && styles.toggleCardSelected,
                 ]}
               >
-                <View style={styles.toggleLeft}>
-                  <Ionicons
-                    name={isSelected ? "trash" : "ellipse-outline"}
-                    size={20}
-                    color={
-                      isSelected ? Colors.primary : Colors.outlineVariant
-                    }
-                  />
-                  <Text
+                <View style={styles.toggleTopRow}>
+                  <View
                     style={[
-                      styles.toggleName,
-                      isSelected && styles.toggleNameSelected,
+                      styles.checkCircle,
+                      isSelected && styles.checkCircleActive,
                     ]}
                   >
-                    {item.name}
-                  </Text>
+                    {isSelected && (
+                      <Ionicons
+                        name="checkmark"
+                        size={14}
+                        color={Colors.onPrimary}
+                      />
+                    )}
+                  </View>
+
+                  <View style={styles.toggleNameWrap}>
+                    <Text
+                      style={[
+                        styles.toggleName,
+                        isSelected && styles.toggleNameSelected,
+                      ]}
+                      numberOfLines={1}
+                    >
+                      {item.name}
+                    </Text>
+                    {hasNickname && (
+                      <Text
+                        style={styles.toggleNickname}
+                        numberOfLines={1}
+                      >
+                        {item.customName}
+                      </Text>
+                    )}
+                  </View>
+
+                  {storageStyle && (
+                    <View
+                      style={[
+                        styles.storageChip,
+                        { backgroundColor: storageStyle.bg },
+                      ]}
+                    >
+                      <Text
+                        style={[
+                          styles.storageChipText,
+                          { color: storageStyle.text },
+                        ]}
+                      >
+                        {storageStyle.label}
+                      </Text>
+                    </View>
+                  )}
                 </View>
-                {isSelected && (
-                  <Ionicons
-                    name="checkmark"
-                    size={20}
-                    color={Colors.primary}
-                  />
+
+                {(purchaseText || showDaysLeft) && (
+                  <Text style={styles.toggleMeta}>
+                    {purchaseText}
+                    {purchaseText && showDaysLeft ? " · " : ""}
+                    {showDaysLeft && (
+                      <Text
+                        style={[
+                          styles.toggleMeta,
+                          urgent && styles.toggleMetaUrgent,
+                        ]}
+                      >
+                        {formatDaysLeft(item.daysLeft as number)}
+                      </Text>
+                    )}
+                  </Text>
                 )}
               </Pressable>
             );
@@ -171,16 +326,26 @@ export default function CookingCompleteScreen() {
       >
         <Pressable
           onPress={handleComplete}
+          disabled={submitting}
           style={({ pressed }) => [
             styles.ctaButton,
-            pressed && { opacity: 0.85, transform: [{ scale: 0.98 }] },
+            submitting && styles.ctaButtonDisabled,
+            pressed &&
+              !submitting && {
+                opacity: 0.85,
+                transform: [{ scale: 0.98 }],
+              },
           ]}
         >
-          <Text style={styles.ctaText}>
-            {selected.size > 0
-              ? `선택한 ${selected.size}개 비우고 식사하러 가기`
-              : `비울 재료 없이 식사하러 가기`}
-          </Text>
+          {submitting ? (
+            <ActivityIndicator color={Colors.onPrimary} />
+          ) : (
+            <Text style={styles.ctaText}>
+              {selectedIds.size > 0
+                ? `선택한 ${selectedIds.size}개 비우고 식사하러 가기`
+                : `비울 재료 없이 식사하러 가기`}
+            </Text>
+          )}
         </Pressable>
       </View>
 
@@ -218,6 +383,10 @@ const styles = StyleSheet.create({
   screen: {
     flex: 1,
     backgroundColor: COOKING_BG,
+  },
+  centered: {
+    alignItems: "center",
+    justifyContent: "center",
   },
 
   // Header
@@ -287,16 +456,15 @@ const styles = StyleSheet.create({
     gap: Spacing.sm,
   },
   toggleCard: {
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "space-between",
-    paddingVertical: Spacing.base,
+    paddingVertical: Spacing.md,
     paddingHorizontal: Spacing.lg,
     borderRadius: Radius.xl,
-    minHeight: 56,
+    borderWidth: 1,
+    borderColor: "transparent",
+    gap: 6,
     ...Platform.select({
       ios: {
-        backgroundColor: "rgba(255,255,255,0.70)",
+        backgroundColor: "#FFFFFF",
         shadowColor: "#191C1D",
         shadowOffset: { width: 0, height: 2 },
         shadowOpacity: 0.04,
@@ -309,28 +477,67 @@ const styles = StyleSheet.create({
     }),
   },
   toggleCardSelected: {
-    ...Platform.select({
-      ios: {
-        backgroundColor: "rgba(181, 241, 192, 0.35)",
-      },
-      android: {
-        backgroundColor: "#E8F5E9",
-      },
-    }),
+    borderColor: Colors.primary,
+    backgroundColor: "#E8F5E9",
   },
-  toggleLeft: {
+  toggleTopRow: {
     flexDirection: "row",
     alignItems: "center",
     gap: Spacing.md,
   },
+  checkCircle: {
+    width: 22,
+    height: 22,
+    borderRadius: 11,
+    borderWidth: 2,
+    borderColor: Colors.outlineVariant,
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: "transparent",
+  },
+  checkCircleActive: {
+    borderColor: Colors.primary,
+    backgroundColor: Colors.primary,
+  },
+  toggleNameWrap: {
+    flex: 1,
+    flexDirection: "row",
+    alignItems: "baseline",
+    gap: 6,
+    flexWrap: "wrap",
+  },
   toggleName: {
     fontSize: FontSize.bodyLg,
-    fontWeight: FontWeight.medium,
-    color: Colors.onSurfaceVariant,
-  },
-  toggleNameSelected: {
     fontWeight: FontWeight.semiBold,
     color: Colors.onSurface,
+  },
+  toggleNameSelected: {
+    color: Colors.onSurface,
+  },
+  toggleNickname: {
+    fontSize: FontSize.bodySm,
+    fontWeight: FontWeight.medium,
+    color: Colors.outline,
+    flexShrink: 1,
+  },
+  storageChip: {
+    paddingHorizontal: 7,
+    paddingVertical: 2,
+    borderRadius: 10,
+  },
+  storageChipText: {
+    fontSize: 11,
+    fontWeight: FontWeight.semiBold,
+  },
+  toggleMeta: {
+    fontSize: FontSize.bodySm,
+    fontWeight: FontWeight.medium,
+    color: Colors.outline,
+    marginLeft: 22 + Spacing.md, // align under name (checkCircle + gap)
+  },
+  toggleMetaUrgent: {
+    color: Colors.error,
+    fontWeight: FontWeight.bold,
   },
 
   // Bottom CTA
@@ -360,6 +567,9 @@ const styles = StyleSheet.create({
     alignItems: "center",
     justifyContent: "center",
     ...Shadows.fab,
+  },
+  ctaButtonDisabled: {
+    backgroundColor: Colors.surfaceContainerHigh,
   },
   ctaText: {
     fontSize: FontSize.bodyLg,

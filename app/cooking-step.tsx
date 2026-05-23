@@ -1,10 +1,11 @@
 import { useState, useEffect, useRef, useMemo, useCallback } from "react";
 import {
-  View,
-  Text,
-  Pressable,
+  ActivityIndicator,
   Platform,
+  Pressable,
   StyleSheet,
+  Text,
+  View,
 } from "react-native";
 import { useRouter, useLocalSearchParams } from "expo-router";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
@@ -18,8 +19,9 @@ import {
   Shadows,
   LetterSpacing,
 } from "@/constants/theme";
-import { MOCK_RECIPE_DETAILS } from "@/mocks";
 import { ConfirmModal } from "@/components/ConfirmModal";
+import { ErrorScreen } from "@/components/ErrorScreen";
+import { getRecipeDetail, type RecipeDetailDto } from "@/services/recipes";
 
 // ─── Time Parsing ─────────────────────────────────────────────────────────────
 
@@ -156,26 +158,47 @@ export default function CookingStepScreen() {
   const router = useRouter();
   const insets = useSafeAreaInsets();
   const { id } = useLocalSearchParams<{ id: string }>();
+  const recipeId = Number(id);
 
-  const recipe = useMemo(
-    () => MOCK_RECIPE_DETAILS.find((r) => r.id === id) ?? MOCK_RECIPE_DETAILS[0],
-    [id],
-  );
+  const [recipe, setRecipe] = useState<RecipeDetailDto | null>(null);
+  const [isLoading, setIsLoading] = useState(true);
+  const [isError, setIsError] = useState(false);
 
   const [stepIndex, setStepIndex] = useState(0);
   const [exitModalVisible, setExitModalVisible] = useState(false);
   const timer = useTimer();
 
-  // RecipeDetail.steps was reshaped to a flat string[] — `currentStep`
-  // is now the instruction text itself, no `.instruction` accessor needed.
-  const currentStep = recipe.steps[stepIndex];
-  const totalSteps = recipe.steps.length;
+  useEffect(() => {
+    if (!id || Number.isNaN(recipeId)) {
+      setIsError(true);
+      setIsLoading(false);
+      return;
+    }
+    let cancelled = false;
+    (async () => {
+      try {
+        const detail = await getRecipeDetail(recipeId);
+        if (!cancelled) setRecipe(detail);
+      } catch {
+        if (!cancelled) setIsError(true);
+      } finally {
+        if (!cancelled) setIsLoading(false);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [id, recipeId]);
+
+  const steps = recipe?.instructions ?? [];
+  const currentStep = steps[stepIndex] ?? "";
+  const totalSteps = steps.length;
   const isFirst = stepIndex === 0;
-  const isLast = stepIndex === totalSteps - 1;
+  const isLast = totalSteps > 0 && stepIndex === totalSteps - 1;
 
   // Does current step's instruction contain any time patterns?
   const hasTimer = useMemo(
-    () => TIME_REGEX.test(currentStep),
+    () => (currentStep ? TIME_REGEX.test(currentStep) : false),
     [currentStep],
   );
 
@@ -189,12 +212,13 @@ export default function CookingStepScreen() {
   };
 
   const goNext = () => {
+    if (!recipe) return;
     if (isLast) {
       router.dismissAll();
       setTimeout(() => {
         router.push({
           pathname: "/cooking-complete",
-          params: { id: recipe.id },
+          params: { id: String(recipeId) },
         });
       }, 10);
       return;
@@ -209,6 +233,27 @@ export default function CookingStepScreen() {
       setStepIndex((i) => i - 1);
     }
   };
+
+  if (isError) {
+    return (
+      <ErrorScreen
+        message="레시피 정보를 불러오지 못했어요"
+        subMessage="잠시 후 다시 시도해 주세요"
+        buttonLabel="이전으로 돌아가기"
+        onPressHome={() => router.back()}
+      />
+    );
+  }
+
+  if (isLoading || !recipe || totalSteps === 0) {
+    return (
+      <View
+        style={[styles.screen, styles.centered, { paddingTop: insets.top }]}
+      >
+        <ActivityIndicator size="large" color={Colors.primary} />
+      </View>
+    );
+  }
 
   return (
     <View style={[styles.screen, { paddingTop: insets.top }]}>
@@ -386,6 +431,10 @@ const styles = StyleSheet.create({
   screen: {
     flex: 1,
     backgroundColor: COOKING_BG,
+  },
+  centered: {
+    alignItems: "center",
+    justifyContent: "center",
   },
 
   // Header

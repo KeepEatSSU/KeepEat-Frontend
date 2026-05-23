@@ -331,14 +331,37 @@ export async function deleteIngredient(id: number): Promise<void> {
 }
 
 /**
+ * DELETE /api/v1/user-ingredients — 벌크. 백엔드 스펙상 ids 배열은
+ * **body**로 전달 (axios는 DELETE도 `data`로 body를 실어보낼 수 있음).
+ * 빈 배열은 호출 자체를 skip.
+ */
+export async function deleteUserIngredients(ids: number[]): Promise<void> {
+  if (ids.length === 0) return;
+  await api.delete(BASE, { data: { ids } });
+}
+
+/**
  * 보유 식재료 중 특정 레시피의 재료와 매칭되는 항목 (서버측 계산).
  * GET /api/v1/user-ingredients/by-recipe/{recipeId} — 204 → 빈 배열.
  *
- * 응답 shape는 추후 확장될 수 있으므로 호출처가 의존하는 `name`만 명시.
- * 다른 필드는 unknown으로 흘려보냄 (필요 시 확장).
+ * cooking-complete의 "다 쓴 재료 삭제" 카드가 표시할 정보를 한 번에
+ * 받아오기 위해 모든 보조 필드를 포함. 백엔드가 일부 필드를 누락해도
+ * 화면이 작동하도록 name/id 외에는 옵셔널.
  */
 export interface OwnedRecipeIngredientDto {
+  /** user-ingredient row id — 삭제 키. 백엔드가 항상 제공. */
+  id: number;
   name: string;
+  /** 사용자 별명("customName"). 마스터 항목의 사용자 별명 + 커스텀 항목의
+   *  표시 이름 둘 다 이 필드로 들어온다. */
+  customName?: string;
+  storageType?: "실온" | "냉장" | "냉동";
+  /** "YYYY-MM-DD" 구매일. */
+  purchaseDate?: string;
+  /** 양수 = 남은 일자, 0 = 오늘, 음수 = 지남. */
+  daysLeft?: number;
+  /** "내 재료"(마스터 외 사용자 직접 추가) 여부. */
+  isCustom?: boolean;
 }
 
 export async function getOwnedIngredientsByRecipe(
