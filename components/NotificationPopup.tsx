@@ -1,32 +1,21 @@
 /**
- * KeepEat — notification tray popup.
+ * KeepEat — full-screen notification tray.
  *
- * Fades a translucent backdrop + popup body in/out together. Uses RN's
- * <Modal> so the overlay sits above the tab bar — wrapping the screen in
- * an absolute-positioned <View> wouldn't cover the tab navigator.
+ * Renders as an iOS-style full-screen modal: header (title + close + mark-all)
+ * sits above a FlatList that grows via cursor-based infinite scroll. The
+ * popup is purely presentational — paging state, loading flag, and the
+ * mark-read callbacks all come from AppHeaderRight so the data lives next
+ * to the unread-badge it drives.
  *
- * Interaction model
- *   Tapping a card marks it as read in the parent and immediately closes
- *   the tray + navigates. No mid-tap animation: the parent re-filters the
- *   array on the next open, and the popup fades out naturally during the
- *   route transition.
+ * Card design (icon bubble + title/body + relative time + unread dot) is
+ * preserved from the previous popup; only the chrome around it changed.
  *
  * Routing
- *   `data` field is intentionally absent on the spec — every notification
- *   routes by `type` alone, with `recipe_ready` going to the recipe tab and
- *   the rest landing on the home (fridge) tab.
+ *   Every card routes by `type` alone (recipe_ready → recipe tab, others →
+ *   home). targetId hooks in A-2 once the backend supplies it.
  */
 
-import {
-  Dimensions,
-  Modal,
-  Pressable,
-  ScrollView,
-  StyleSheet,
-  Text,
-  View,
-} from "react-native";
-import Animated, { FadeIn, FadeOut } from "react-native-reanimated";
+import { ActivityIndicator, FlatList, Modal, Pressable, StyleSheet, Text, View } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 import { useRouter } from "expo-router";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
@@ -36,7 +25,6 @@ import {
   FontWeight,
   LetterSpacing,
   Radius,
-  Shadows,
   Spacing,
 } from "@/constants/theme";
 import type {
@@ -44,11 +32,6 @@ import type {
   NotificationType,
 } from "@/constants/domain";
 import { formatRelativeTime } from "@/utils/dateUtils";
-
-// Pixel-based cap so the popup is predictable across devices. Percent maxHeight
-// inside <Modal> resolves against an ambiguous parent height, which had been
-// clamping the tray well below the intended ceiling.
-const POPUP_MAX_HEIGHT = Dimensions.get("window").height * 0.8;
 
 // Per-type icon + accent color. Kept inline (not a separate config file)
 // because the popup is the only consumer.
@@ -78,80 +61,129 @@ const TYPE_VISUAL: Record<
   },
 };
 
+// Route by type. NOTICE/RECIPE_READY → /recipe (recipe tab is where they
+// get marked-as-read on focus); EXPIRY_SOON/WEEKLY_CHEER → / (home tab).
 function routeForType(type: NotificationType): "/" | "/recipe" {
-  return type === "recipe_ready" ? "/recipe" : "/";
+  return type === "recipe_ready" || type === "notice" ? "/recipe" : "/";
 }
 
 interface Props {
   visible: boolean;
   onClose: () => void;
   notifications: AppNotification[];
+  unreadCount: number;
+  hasNext: boolean;
+  loading: boolean;
+  onLoadMore: () => void;
   onNotificationRead: (id: number) => void;
+  onMarkAllRead: () => void;
 }
 
 export function NotificationPopup({
   visible,
   onClose,
   notifications,
+  unreadCount,
+  hasNext,
+  loading,
+  onLoadMore,
   onNotificationRead,
+  onMarkAllRead,
 }: Props) {
   const router = useRouter();
   const insets = useSafeAreaInsets();
 
   const handleCardPress = (n: AppNotification) => {
-    if (!n.isRead) onNotificationRead(n.id);
+    // Read state is now driven by the destination screen via markTypeRead
+    // in useFocusEffect — tapping the card just navigates. (onNotificationRead
+    // prop is retained on the interface for future direct-read use cases.)
     onClose();
     router.push(routeForType(n.type) as never);
+  };
+
+  const renderFooter = () => {
+    if (loading) {
+      return (
+        <View style={styles.footer}>
+          <ActivityIndicator color={Colors.primary} />
+        </View>
+      );
+    }
+    if (!hasNext && notifications.length > 0) {
+      return (
+        <View style={styles.footer}>
+          <Text style={styles.footerEnd}>모든 알림을 확인했어요</Text>
+        </View>
+      );
+    }
+    return null;
   };
 
   return (
     <Modal
       visible={visible}
-      transparent
-      animationType="none"
+      animationType="slide"
+      presentationStyle="fullScreen"
       onRequestClose={onClose}
-      statusBarTranslucent
     >
-      {visible && (
-        <View style={StyleSheet.absoluteFill}>
-          {/* Backdrop — taps anywhere outside the popup body close the tray. */}
-          <Animated.View
-            entering={FadeIn.duration(180)}
-            exiting={FadeOut.duration(160)}
-            style={styles.backdrop}
-          >
-            <Pressable style={StyleSheet.absoluteFill} onPress={onClose} />
-          </Animated.View>
-
-          <Animated.View
-            entering={FadeIn.duration(200)}
-            exiting={FadeOut.duration(150)}
-            style={[
-              styles.popup,
-              { marginTop: insets.top + Spacing.sm },
+      <View style={[styles.screen, { paddingTop: insets.top }]}>
+        {/* Header row 1: close (left) + title (center) + spacer (right,
+            visual balance). Mirrors the [close][title][44 spacer] pattern
+            used by detail/cooking-* screens so all left-X headers line up. */}
+        <View style={styles.headerRow}>
+          <Pressable
+            onPress={onClose}
+            accessibilityRole="button"
+            accessibilityLabel="알림 닫기"
+            hitSlop={8}
+            style={({ pressed }) => [
+              styles.closeBtn,
+              pressed && { opacity: 0.6 },
             ]}
           >
-            <View style={styles.header}>
-              <Text style={styles.headerTitle}>알림</Text>
-              <Pressable
-                onPress={onClose}
-                accessibilityRole="button"
-                accessibilityLabel="알림 닫기"
-                hitSlop={8}
-                style={({ pressed }) => [
-                  styles.closeBtn,
-                  pressed && { opacity: 0.6 },
-                ]}
-              >
-                <Ionicons
-                  name="close"
-                  size={22}
-                  color={Colors.onSurfaceVariant}
-                />
-              </Pressable>
-            </View>
+            <Ionicons name="close" size={24} color={Colors.onSurface} />
+          </Pressable>
+          <Text style={styles.headerTitle}>알림</Text>
+          <View style={styles.headerSpacer} />
+        </View>
 
-            {notifications.length === 0 ? (
+        {/* Header row 2: 전체 읽음 — only when there's something to mark. */}
+        {unreadCount > 0 && (
+          <View style={styles.actionsRow}>
+            <Pressable
+              onPress={onMarkAllRead}
+              accessibilityRole="button"
+              accessibilityLabel="모두 읽음으로 표시"
+              hitSlop={6}
+              style={({ pressed }) => [
+                styles.markAllBtn,
+                pressed && { opacity: 0.6 },
+              ]}
+            >
+              <Ionicons
+                name="checkmark-done-outline"
+                size={16}
+                color={Colors.primary}
+              />
+              <Text style={styles.markAllText}>모두 읽음으로 표시</Text>
+            </Pressable>
+          </View>
+        )}
+
+        <FlatList
+          data={notifications}
+          keyExtractor={(item) => String(item.id)}
+          renderItem={({ item }) => (
+            <NotificationCard
+              item={item}
+              onPress={() => handleCardPress(item)}
+            />
+          )}
+          onEndReached={hasNext && !loading ? onLoadMore : undefined}
+          onEndReachedThreshold={0.5}
+          ListFooterComponent={renderFooter}
+          ListEmptyComponent={
+            !loading ? (
               <View style={styles.emptyContainer}>
                 <Ionicons
                   name="notifications-off-outline"
@@ -160,24 +192,15 @@ export function NotificationPopup({
                 />
                 <Text style={styles.emptyText}>아직 알림이 없어요</Text>
               </View>
-            ) : (
-              <ScrollView
-                style={styles.list}
-                contentContainerStyle={styles.listContent}
-                showsVerticalScrollIndicator={false}
-              >
-                {notifications.map((n) => (
-                  <NotificationCard
-                    key={n.id}
-                    item={n}
-                    onPress={() => handleCardPress(n)}
-                  />
-                ))}
-              </ScrollView>
-            )}
-          </Animated.View>
-        </View>
-      )}
+            ) : null
+          }
+          contentContainerStyle={[
+            styles.listContent,
+            { paddingBottom: Math.max(insets.bottom, Spacing.xl) },
+          ]}
+          showsVerticalScrollIndicator={false}
+        />
+      </View>
     </Modal>
   );
 }
@@ -230,50 +253,65 @@ function NotificationCard({
 // ─── Styles ──────────────────────────────────────────────────────────────────
 
 const styles = StyleSheet.create({
-  backdrop: {
-    ...StyleSheet.absoluteFillObject,
-    backgroundColor: "rgba(0, 0, 0, 0.35)",
+  screen: {
+    flex: 1,
+    backgroundColor: Colors.surface,
   },
 
-  popup: {
-    marginHorizontal: Spacing.base,
-    backgroundColor: Colors.surfaceContainerLowest,
-    borderRadius: Radius.xl + 2, // ~18px per spec
-    paddingHorizontal: Spacing.lg,
-    paddingTop: Spacing.lg,
-    paddingBottom: Spacing.md,
-    // Content-driven height up to a hard pixel cap; ScrollView takes over past it.
-    maxHeight: POPUP_MAX_HEIGHT,
-    ...Shadows.ambient,
-  },
-
-  header: {
+  // Header — title + close in one row, mark-all in a second compact row
+  // so it has dedicated visual weight without overlapping the title.
+  headerRow: {
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "space-between",
-    marginBottom: Spacing.md,
+    paddingHorizontal: Spacing.xl,
+    paddingTop: Spacing.md,
+    paddingBottom: Spacing.xs,
   },
   headerTitle: {
-    fontSize: FontSize.titleLg,
-    fontWeight: FontWeight.bold,
+    fontSize: FontSize.headlineSm,
+    fontWeight: FontWeight.extraBold,
     color: Colors.onSurface,
     letterSpacing: LetterSpacing.tight,
   },
   closeBtn: {
-    width: 32,
-    height: 32,
+    width: 44,
+    height: 44,
     alignItems: "center",
     justifyContent: "center",
   },
-
-  list: {
-    flexGrow: 0,
+  // Mirrors the closeBtn width so the centered title sits at true mid-screen.
+  headerSpacer: {
+    width: 44,
   },
-  listContent: {
-    gap: Spacing.sm,
+
+  actionsRow: {
+    flexDirection: "row",
+    justifyContent: "flex-end",
+    paddingHorizontal: Spacing.xl,
     paddingBottom: Spacing.sm,
   },
+  markAllBtn: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: Spacing.xs,
+    paddingVertical: Spacing.xs,
+    paddingHorizontal: Spacing.sm,
+  },
+  markAllText: {
+    fontSize: FontSize.labelMd,
+    fontWeight: FontWeight.semiBold,
+    color: Colors.primary,
+  },
 
+  // List
+  listContent: {
+    paddingHorizontal: Spacing.xl,
+    gap: Spacing.sm,
+    flexGrow: 1,
+  },
+
+  // Card
   card: {
     flexDirection: "row",
     alignItems: "center",
@@ -281,14 +319,16 @@ const styles = StyleSheet.create({
     paddingVertical: Spacing.md,
     paddingHorizontal: Spacing.md,
     borderRadius: Radius.lg,
-    backgroundColor: Colors.surface,
+    backgroundColor: Colors.surfaceContainerLowest,
   },
   cardUnread: {
-    // Slight tonal lift so unread cards "pop" against read ones — adheres to
-    // the no-line surface-shift rule rather than borders.
-    backgroundColor: "#F0FAF3",
+    // Mid-mint between surfaceSubtle (#F8FAF8) and secondaryContainer (#B5F1C0).
+    // The previous #F0FAF3 was too close to the screen surface (#F8F9FA) and
+    // visually under-weighted next to the white read cards → unread looked
+    // less prominent. Bumping saturation here restores the proper hierarchy
+    // without adding a shadow (No-Line rule).
+    backgroundColor: "#D9F5E0",
   },
-
   iconBubble: {
     width: 36,
     height: 36,
@@ -296,7 +336,6 @@ const styles = StyleSheet.create({
     alignItems: "center",
     justifyContent: "center",
   },
-
   cardBody: {
     flex: 1,
     minWidth: 0,
@@ -313,7 +352,6 @@ const styles = StyleSheet.create({
     color: Colors.onSurfaceVariant,
     lineHeight: 16,
   },
-
   cardRight: {
     alignItems: "flex-end",
     gap: 6,
@@ -330,8 +368,21 @@ const styles = StyleSheet.create({
     backgroundColor: Colors.primaryContainer,
   },
 
+  // Footer (loading / end-of-list)
+  footer: {
+    paddingVertical: Spacing.lg,
+    alignItems: "center",
+  },
+  footerEnd: {
+    fontSize: FontSize.labelMd,
+    fontWeight: FontWeight.medium,
+    color: Colors.outline,
+  },
+
+  // Empty
   emptyContainer: {
-    paddingVertical: Spacing.xxl + Spacing.sm,
+    flex: 1,
+    paddingVertical: Spacing.xxl + Spacing.xxl,
     alignItems: "center",
     gap: Spacing.md,
   },

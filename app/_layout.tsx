@@ -8,6 +8,8 @@ import * as WebBrowser from "expo-web-browser";
 import { ToastProvider } from "@/components/Toast";
 import { RecipeRecommendationProvider } from "@/context/RecipeRecommendationContext";
 import { AuthProvider, useAuth } from "@/context/AuthContext";
+import { NotificationProvider } from "@/context/NotificationContext";
+import { fetchMaster } from "@/services/ingredientMaster";
 import { registerForPushNotificationsAsync } from "@/services/pushNotifications";
 
 // Required for the in-app browser auth session to dismiss cleanly on iOS
@@ -30,7 +32,9 @@ function AuthGate({ children }: { children: React.ReactNode }) {
   useEffect(() => {
     if (isLoading) return;
     const inAuthGroup =
-      segments[0] === "login" || segments[0] === "signup";
+      segments[0] === "login" ||
+      segments[0] === "signup" ||
+      segments[0] === "signup-profile";
 
     if (!isAuthenticated && !inAuthGroup) {
       router.replace("/login");
@@ -54,6 +58,20 @@ function AuthGate({ children }: { children: React.ReactNode }) {
   return <>{children}</>;
 }
 
+// Loads the ingredient master catalog into the in-memory snapshot once the
+// user is authenticated. Idempotent — re-fires on login transitions and the
+// service de-dupes via its ETag/cache. Renders nothing.
+function IngredientMasterBootstrap() {
+  const { isAuthenticated } = useAuth();
+  useEffect(() => {
+    if (!isAuthenticated) return;
+    fetchMaster().then((source) => {
+      if (__DEV__) console.log("[master] loaded from:", source);
+    });
+  }, [isAuthenticated]);
+  return null;
+}
+
 export default function RootLayout() {
   // One-shot push-token registration on app boot. Server upload comes later;
   // for now we just log so we can verify the issuance pipeline end-to-end.
@@ -68,10 +86,12 @@ export default function RootLayout() {
   return (
     <GestureHandlerRootView style={{ flex: 1 }}>
       <AuthProvider>
-        <RecipeRecommendationProvider>
+        <NotificationProvider>
+          <RecipeRecommendationProvider>
           <PortalProvider>
             <ToastProvider>
               <AuthGate>
+                <IngredientMasterBootstrap />
                 <Stack screenOptions={{ headerShown: false }}>
                   <Stack.Screen name="(tabs)" />
                   <Stack.Screen
@@ -80,6 +100,14 @@ export default function RootLayout() {
                   />
                   <Stack.Screen
                     name="signup"
+                    options={{ animation: "slide_from_right" }}
+                  />
+                  <Stack.Screen
+                    name="signup-profile"
+                    options={{ animation: "slide_from_right" }}
+                  />
+                  <Stack.Screen
+                    name="change-password"
                     options={{ animation: "slide_from_right" }}
                   />
                   <Stack.Screen
@@ -148,7 +176,8 @@ export default function RootLayout() {
               <StatusBar style="dark" />
             </ToastProvider>
           </PortalProvider>
-        </RecipeRecommendationProvider>
+          </RecipeRecommendationProvider>
+        </NotificationProvider>
       </AuthProvider>
     </GestureHandlerRootView>
   );
