@@ -5,6 +5,7 @@ import {
   type ChipConfig,
 } from "@/components/AppSearchChipsHeader";
 import { ErrorScreen } from "@/components/ErrorScreen";
+import { IngredientIcon } from "@/components/IngredientIcon";
 import { useToast } from "@/components/Toast";
 import {
   FRIDGE_FILTER_CHIPS,
@@ -25,6 +26,7 @@ import {
   fetchAllIngredients,
   searchIngredients,
 } from "@/services/userIngredients";
+import { useNotifications } from "@/context/NotificationContext";
 import { getDDayInfo } from "@/utils/dateUtils";
 import { Ionicons } from "@expo/vector-icons";
 import * as Haptics from "expo-haptics";
@@ -68,7 +70,7 @@ function getDDayBadgeColor(status: string): string {
 
 const SCREEN_WIDTH = Dimensions.get("window").width;
 
-const GRID_GAP = Spacing.md;
+const GRID_GAP = Spacing.sm;
 const GRID_PADDING = Spacing.xl;
 const CARD_WIDTH = (SCREEN_WIDTH - GRID_PADDING * 2 - GRID_GAP) / 2;
 
@@ -143,6 +145,14 @@ function IngredientGridCard({
         </View>
       </View>
 
+      <View style={gridStyles.iconSlot}>
+        <IngredientIcon
+          ingredientId={item.ingredientId}
+          isCustom={item.isCustom}
+          size={80}
+        />
+      </View>
+
       <Text style={gridStyles.heroName} numberOfLines={2}>
         {item.name}
       </Text>
@@ -180,17 +190,27 @@ const gridStyles = StyleSheet.create({
   card: {
     width: CARD_WIDTH,
     backgroundColor: Colors.surfaceContainerLowest,
-    borderRadius: Radius.xl,
-    padding: Spacing.lg,
-    alignItems: "flex-start",
+    borderRadius: Radius.lg,
+    padding: Spacing.md,
+    // `stretch` so children fill the card width — lets textAlign:"center"
+    // actually center within the full row instead of around the text's
+    // intrinsic box. cardTop already overrode this; explicit is cleaner.
+    alignItems: "stretch",
     ...Shadows.floatingCard,
   },
   cardTop: {
-    alignSelf: "stretch",
     flexDirection: "row",
     justifyContent: "space-between",
     alignItems: "center",
-    marginBottom: Spacing.sm,
+    // 0 — the ingredient webps have a built-in 6% padding ring (convert
+    // script PADDING_RATIO=0.06), so we let that ring serve as the natural
+    // gap to the chips row instead of stacking margin on top.
+    marginBottom: 0,
+  },
+  iconSlot: {
+    alignItems: "center",
+    // Same reasoning — webp ring absorbs the gap to the heroName below.
+    marginBottom: 0,
   },
   storageChip: {
     paddingHorizontal: Spacing.sm,
@@ -213,26 +233,26 @@ const gridStyles = StyleSheet.create({
     color: "#FFFFFF",
   },
   heroName: {
-    fontSize: FontSize.headlineSm,
+    fontSize: FontSize.bodyLg,
     fontWeight: FontWeight.extraBold,
     color: Colors.onSurface,
     letterSpacing: LetterSpacing.tight,
-    textAlign: "left",
-    marginBottom: Spacing.xs,
+    textAlign: "center",
+    marginBottom: 2,
   },
   nickname: {
-    fontSize: FontSize.labelMd,
+    fontSize: FontSize.labelSm,
     fontWeight: FontWeight.medium,
     color: Colors.onSecondaryContainer,
-    textAlign: "left",
-    lineHeight: 18,
+    textAlign: "center",
+    lineHeight: 14,
   },
-  // Reserves a fixed 18px row (matches nickname lineHeight) so cards without
-  // a nickname keep the same height as cards with one. heroName's existing
-  // marginBottom: xs provides the spacing above this slot — no marginTop here.
+  // Reserves a fixed 16pt row so cards without a nickname keep the same
+  // height as cards with one. Slightly taller than the 14pt lineHeight so
+  // the nickname row gets a hair of breathing space; both empty and text
+  // states render at 16pt → height-stable.
   nicknameSlot: {
-    minHeight: 18,
-    alignSelf: "stretch",
+    minHeight: 16,
     justifyContent: "center",
   },
   cardSelected: {
@@ -266,6 +286,7 @@ export default function FridgeScreen() {
   const router = useRouter();
   const insets = useSafeAreaInsets();
   const { showToast } = useToast();
+  const { markTypeRead } = useNotifications();
 
   // ── Async data state ──
   // `ingredients` = full fridge (refetched on focus). `searchResults` is the
@@ -470,6 +491,16 @@ export default function FridgeScreen() {
       fetchFridgeData({ silent: hasLoadedOnce });
     // eslint-disable-next-line react-hooks/exhaustive-deps
     }, []),
+  );
+
+  // Entering the home tab marks both home-targeted notification types as
+  // read. markTypeRead has a no-op gate when there's nothing unread, so
+  // firing on every focus is cheap (one render bailout + zero PATCH calls).
+  useFocusEffect(
+    useCallback(() => {
+      markTypeRead("expiry_soon");
+      markTypeRead("weekly_cheer");
+    }, [markTypeRead]),
   );
 
   // Server-side search with 300ms debounce. Empty query → fall back to the
@@ -939,12 +970,15 @@ const styles = StyleSheet.create({
     color: Colors.onPrimary,
   },
 
-  // Ingredient Grid
+  // Ingredient Grid — paddingHorizontal + gap MUST match the constants used
+  // in the CARD_WIDTH formula. Hardcoding them separately let them drift and
+  // pushed the row total past available width → flexWrap collapsed to 1
+  // column. Reference the constants directly so future tweaks stay in sync.
   gridContent: {
     flexDirection: "row",
     flexWrap: "wrap",
-    paddingHorizontal: Spacing.xl,
+    paddingHorizontal: GRID_PADDING,
     paddingBottom: 120,
-    gap: Spacing.md,
+    gap: GRID_GAP,
   },
 });

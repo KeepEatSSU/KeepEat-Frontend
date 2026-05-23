@@ -9,12 +9,11 @@ import {
 } from "@/constants/theme";
 import { type StorageType } from "@/constants/domain";
 import {
-  STORAGE_OPTIONS_BY_INGREDIENT_ID,
   METRIC_TO_DAYS,
   type ApiStorageType,
-  type StorageMetric,
 } from "@/constants/ingredients-master";
-import { toISODate } from "@/utils/dateUtils";
+import { getMasterSnapshot } from "@/services/ingredientMaster";
+import { toISODate, formatDaysApprox } from "@/utils/dateUtils";
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -23,19 +22,6 @@ const STORAGE_DOMAIN_TO_API: Record<StorageType, ApiStorageType> = {
   fridge: "냉장",
   frozen: "냉동",
 };
-
-function formatMetric(value: number, metric: StorageMetric): string {
-  switch (metric) {
-    case "Days":
-      return `${value}일`;
-    case "Weeks":
-      return `${value}주`;
-    case "Months":
-      return `${value}개월`;
-    case "Years":
-      return `${value}년`;
-  }
-}
 
 function addDays(base: Date, days: number): Date {
   const d = new Date(base);
@@ -82,7 +68,7 @@ export function QuickExpiryPicker({
 }: QuickExpiryPickerProps) {
   const match = useMemo(() => {
     if (ingredientId == null || storage == null) return undefined;
-    const opts = STORAGE_OPTIONS_BY_INGREDIENT_ID.get(ingredientId);
+    const opts = getMasterSnapshot().optionsByIngredientId.get(ingredientId);
     if (!opts) return undefined;
     return opts.find(
       (o) => o.storageType === STORAGE_DOMAIN_TO_API[storage],
@@ -98,24 +84,23 @@ export function QuickExpiryPicker({
 
   const avg = (match.min + match.max) / 2;
 
+  // Day counts used by both the label formatter and the date calculation
+  // — same source so the chip's label and its onPick result can never drift.
+  // For API-sourced data `metric` is always "Days" (multiplier 1); for seed
+  // fallback the multiplier converts to days.
+  const minDays = Math.round(match.min * METRIC_TO_DAYS[match.metric]);
+  const maxDays = Math.round(match.max * METRIC_TO_DAYS[match.metric]);
+  const avgDays = Math.round(avg * METRIC_TO_DAYS[match.metric]);
+
   // Derive the active chip from the current expirationDate. Uses the *same*
   // formula as `apply` so clicking a chip and then comparing back hits 1-1.
   // Order matters on ties (min == max): min wins → then avg → then max.
   const activeMetric: "min" | "avg" | "max" | null = (() => {
     if (!expirationDate) return null;
     const expIso = toISODate(expirationDate);
-    const minIso = toISODate(
-      addDays(purchaseDate, Math.round(match.min * METRIC_TO_DAYS[match.metric])),
-    );
-    if (expIso === minIso) return "min";
-    const avgIso = toISODate(
-      addDays(purchaseDate, Math.round(avg * METRIC_TO_DAYS[match.metric])),
-    );
-    if (expIso === avgIso) return "avg";
-    const maxIso = toISODate(
-      addDays(purchaseDate, Math.round(match.max * METRIC_TO_DAYS[match.metric])),
-    );
-    if (expIso === maxIso) return "max";
+    if (expIso === toISODate(addDays(purchaseDate, minDays))) return "min";
+    if (expIso === toISODate(addDays(purchaseDate, avgDays))) return "avg";
+    if (expIso === toISODate(addDays(purchaseDate, maxDays))) return "max";
     return null;
   })();
 
@@ -125,24 +110,21 @@ export function QuickExpiryPicker({
       <View style={styles.buttons}>
         <Btn
           prefix="최소"
-          value={match.min}
-          metric={match.metric}
+          days={minDays}
           active={activeMetric === "min"}
           inGroup={inGroup}
           onPress={() => apply(match.min)}
         />
         <Btn
           prefix="평균"
-          value={Math.round(avg)}
-          metric={match.metric}
+          days={avgDays}
           active={activeMetric === "avg"}
           inGroup={inGroup}
           onPress={() => apply(avg)}
         />
         <Btn
           prefix="최대"
-          value={match.max}
-          metric={match.metric}
+          days={maxDays}
           active={activeMetric === "max"}
           inGroup={inGroup}
           onPress={() => apply(match.max)}
@@ -156,15 +138,14 @@ export function QuickExpiryPicker({
 
 function Btn({
   prefix,
-  value,
-  metric,
+  days,
   active,
   inGroup,
   onPress,
 }: {
   prefix: string;
-  value: number;
-  metric: StorageMetric;
+  /** Raw day count — used only for the approximate-unit label. */
+  days: number;
   active: boolean;
   inGroup: boolean;
   onPress: () => void;
@@ -183,7 +164,7 @@ function Btn({
         {prefix}
       </Text>
       <Text style={[styles.btnValue, active && styles.btnValueActive]}>
-        {formatMetric(value, metric)}
+        {formatDaysApprox(days)}
       </Text>
     </Pressable>
   );

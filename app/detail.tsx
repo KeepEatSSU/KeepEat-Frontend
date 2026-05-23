@@ -17,6 +17,7 @@ import { IngredientPickerSheet } from "@/components/IngredientPickerSheet";
 import { ExpandableDatePicker } from "@/components/ExpandableDatePicker";
 import { QuickExpiryPicker } from "@/components/QuickExpiryPicker";
 import { ErrorScreen } from "@/components/ErrorScreen";
+import { IngredientIcon } from "@/components/IngredientIcon";
 import { useToast } from "@/components/Toast";
 import {
   Colors,
@@ -41,7 +42,8 @@ import {
   mapIngredientToUpdateRequest,
   type IngredientUpdate,
 } from "@/services/userIngredients";
-import { INGREDIENT_BY_NAME } from "@/constants/ingredients-master";
+import { getMasterSnapshot } from "@/services/ingredientMaster";
+import { mapStorageTypeFromApi } from "@/services/userIngredients";
 import { CapacityInput } from "@/components/CapacityInput";
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
@@ -108,6 +110,10 @@ type DetailInit = {
   purchaseDate: Date;
   storage: StorageType;
   expirationDate: Date;
+  /** Master ID from the user-ingredient row — null for custom items. */
+  ingredientId: number | null;
+  /** Backend-flagged "내 재료". */
+  isCustom: boolean;
 };
 
 function deriveInit(found: Ingredient): DetailInit {
@@ -140,6 +146,8 @@ function deriveInit(found: Ingredient): DetailInit {
     purchaseDate,
     storage: found.storageType,
     expirationDate,
+    ingredientId: found.ingredientId ?? null,
+    isCustom: found.isCustom ?? false,
   };
 }
 
@@ -223,14 +231,34 @@ function DetailEditor({
   const [expirationDate, setExpirationDate] = useState(init.expirationDate);
   const [submitting, setSubmitting] = useState(false);
 
-  // Reverse-lookup the master ingredient ID from the saved name. Backend
-  // doesn't echo this on the user-ingredient row, so falling back to the
-  // name index is the simplest path. Undefined if the user typed a custom
-  // name we can't map — quick-pick stays hidden in that case.
+  // Prefer the backend-provided master ID from the user-ingredient row.
+  // The name-index fallback covers older rows where the API hadn't started
+  // echoing `ingredientId` yet — for true custom items both resolve to
+  // undefined, which keeps the quick-pick chips hidden.
   const masterIngredientId = useMemo(
-    () => INGREDIENT_BY_NAME.get(name)?.id,
-    [name],
+    () => init.ingredientId ?? getMasterSnapshot().byName.get(name)?.id,
+    [init.ingredientId, name],
   );
+
+  // Trust the backend `isCustom` when present; otherwise infer from whether
+  // the name resolved to a master entry. Drives the avatar (pen vs photo).
+  const isCustom = init.isCustom || masterIngredientId == null;
+
+  // Whether the quick-expiry chips will actually render — mirrors
+  // QuickExpiryPicker's internal `match` check so we can decide between the
+  // grouped (chips + date) card and the standalone date picker. Same pattern
+  // IngredientEditCard uses in the add flow.
+  const hasQuickExpiry = useMemo(() => {
+    if (masterIngredientId == null) return false;
+    const opts = getMasterSnapshot().optionsByIngredientId.get(masterIngredientId);
+    if (!opts) return false;
+    const apiStorage = mapStorageTypeFromApi
+      // mapStorageTypeFromApi maps the other direction (api → domain). We need
+      // domain → api here, so do an explicit lookup against the same options.
+      ? opts.find((o) => mapStorageTypeFromApi(o.storageType) === storage)
+      : undefined;
+    return !!apiStorage;
+  }, [masterIngredientId, storage]);
 
   const handleStorageChange = (newStorage: StorageType) => {
     setStorage(newStorage);
@@ -345,21 +373,26 @@ function DetailEditor({
           <Ionicons name="close" size={24} color={Colors.onSurface} />
         </Pressable>
 
-        {/* Tappable name title */}
+        {/* Tappable name title — locked for custom items because there's no
+            master ↔ custom conversion. The picker would let the user pick a
+            different catalog ingredient, which doesn't apply here. */}
         <Pressable
           onPress={() => setCategoryPickerVisible(true)}
+          disabled={isCustom}
           style={({ pressed }) => [
             styles.headerTitleBtn,
-            pressed && { opacity: 0.6 },
+            pressed && !isCustom && { opacity: 0.6 },
           ]}
         >
           <Text style={styles.headerTitle}>{name}</Text>
-          <Ionicons
-            name="chevron-down"
-            size={16}
-            color={Colors.outline}
-            style={{ marginLeft: 4 }}
-          />
+          {!isCustom && (
+            <Ionicons
+              name="chevron-down"
+              size={16}
+              color={Colors.outline}
+              style={{ marginLeft: 4 }}
+            />
+          )}
         </Pressable>
 
         <Pressable
@@ -380,6 +413,16 @@ function DetailEditor({
         contentContainerStyle={styles.scrollContent}
         keyboardShouldPersistTaps="handled"
       >
+        {/* Icon — master webp or pen for custom. Anchors the page visually
+            between the system header and the inline nickname field. */}
+        <View style={styles.iconSlot}>
+          <IngredientIcon
+            ingredientId={masterIngredientId}
+            isCustom={isCustom}
+            size={88}
+          />
+        </View>
+
         {/* Hero — inline editable nickname */}
         <View style={styles.hero}>
           <View
@@ -423,20 +466,36 @@ function DetailEditor({
 
           <StorageChips selected={storage} onSelect={handleStorageChange} />
 
-          <QuickExpiryPicker
-            ingredientId={masterIngredientId}
-            storage={storage}
-            purchaseDate={purchaseDate}
-            expirationDate={expirationDate}
-            onPick={setExpirationDate}
-          />
-
-          <ExpandableDatePicker
-            label="소비기한"
-            value={expirationDate}
-            onChange={setExpirationDate}
-            suffix="까지"
-          />
+          {/* Expiry group: chips + date picker wrapped in a single labeled
+              container so the connection between them reads visually. Same
+              shape as the add-confirm card. Falls back to standalone date
+              picker when there's no master-record match for these chips. */}
+          {hasQuickExpiry ? (
+            <View style={styles.expiryGroup}>
+              <Text style={styles.expiryGroupLabel}>소비기한</Text>
+              <QuickExpiryPicker
+                ingredientId={masterIngredientId}
+                storage={storage}
+                purchaseDate={purchaseDate}
+                expirationDate={expirationDate}
+                onPick={setExpirationDate}
+                showLabel={false}
+                inGroup
+              />
+              <ExpandableDatePicker
+                value={expirationDate}
+                onChange={setExpirationDate}
+                suffix="까지"
+              />
+            </View>
+          ) : (
+            <ExpandableDatePicker
+              label="소비기한"
+              value={expirationDate}
+              onChange={setExpirationDate}
+              suffix="까지"
+            />
+          )}
 
         </View>
 
@@ -590,10 +649,16 @@ const styles = StyleSheet.create({
     color: Colors.outline,
   },
 
+  // Icon slot (sits between header and hero nickname)
+  iconSlot: {
+    alignItems: "center",
+    marginTop: Spacing.xl,
+  },
+
   // Hero
   hero: {
     alignItems: "center",
-    marginTop: Spacing.xl,
+    marginTop: Spacing.base,
     marginBottom: 40,
   },
   heroInputWrap: {
@@ -655,4 +720,20 @@ const styles = StyleSheet.create({
     color: Colors.onPrimary,
   },
 
+  // Expiry group — mirrors IngredientEditCard.expiryGroup/expiryGroupLabel.
+  // Visual contract is shared with the add-confirm card; if the styling
+  // drifts, sync both call sites (a future round can extract this into a
+  // shared ExpiryGroupCard component).
+  expiryGroup: {
+    backgroundColor: Colors.surfaceContainerLow,
+    borderRadius: Radius.lg,
+    padding: Spacing.base,
+    gap: Spacing.sm,
+  },
+  expiryGroupLabel: {
+    fontSize: FontSize.labelSm,
+    fontWeight: FontWeight.bold,
+    color: Colors.primary,
+    letterSpacing: LetterSpacing.wide,
+  },
 });

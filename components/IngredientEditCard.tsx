@@ -11,6 +11,7 @@ import { ExpandableDatePicker } from "@/components/ExpandableDatePicker";
 import { CapacityInput } from "@/components/CapacityInput";
 import { QuickExpiryPicker } from "@/components/QuickExpiryPicker";
 import { InfoModal } from "@/components/InfoModal";
+import { IngredientIcon } from "@/components/IngredientIcon";
 import {
   Colors,
   Spacing,
@@ -27,10 +28,10 @@ import {
 } from "@/constants/domain";
 import {
   METRIC_TO_DAYS,
-  STORAGE_OPTIONS_BY_INGREDIENT_ID,
   type ApiStorageType,
   type StorageOptionEntry,
 } from "@/constants/ingredients-master";
+import { getMasterSnapshot } from "@/services/ingredientMaster";
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -79,7 +80,7 @@ export function IngredientEditCard({
   // Master storage options for the currently picked ingredient (if any).
   const masterOptions = useMemo<StorageOptionEntry[] | undefined>(() => {
     if (item.ingredientId == null) return undefined;
-    return STORAGE_OPTIONS_BY_INGREDIENT_ID.get(item.ingredientId);
+    return getMasterSnapshot().optionsByIngredientId.get(item.ingredientId);
   }, [item.ingredientId]);
 
   // Whether the quick-expiry chips will actually render. Mirrors
@@ -89,7 +90,7 @@ export function IngredientEditCard({
     const { isCustom, ingredientId, storage } = item;
     if (isCustom) return false;
     if (ingredientId == null || storage == null) return false;
-    const opts = STORAGE_OPTIONS_BY_INGREDIENT_ID.get(ingredientId);
+    const opts = getMasterSnapshot().optionsByIngredientId.get(ingredientId);
     if (!opts) return false;
     const apiStorage = STORAGE_DOMAIN_TO_API[storage];
     return opts.some((o) => o.storageType === apiStorage);
@@ -112,7 +113,7 @@ export function IngredientEditCard({
     const autoExpiry = (() => {
       if (item.expirationManuallySet) return undefined;
       if (item.ingredientId == null) return undefined;
-      const options = STORAGE_OPTIONS_BY_INGREDIENT_ID.get(item.ingredientId);
+      const options = getMasterSnapshot().optionsByIngredientId.get(item.ingredientId);
       if (!options) return undefined;
       const opt = options.find(
         (o) => o.storageType === STORAGE_DOMAIN_TO_API[newStorage],
@@ -220,6 +221,17 @@ export function IngredientEditCard({
             <Text style={styles.deleteText}>삭제하기</Text>
           </Pressable>
         )}
+      </View>
+
+      {/* Avatar — auto-switches to the pen glyph the moment isCustom flips
+          on (toggle clears ingredientId in the same patch) or when the user
+          hasn't picked a master item yet. */}
+      <View style={styles.iconSlot}>
+        <IngredientIcon
+          ingredientId={item.ingredientId}
+          isCustom={item.isCustom}
+          size={56}
+        />
       </View>
 
       {/* Header: tappable name (picker) or free text input (custom mode) */}
@@ -429,6 +441,9 @@ const styles = StyleSheet.create({
   },
   infoButton: {
     padding: 2,
+  },
+  iconSlot: {
+    alignItems: "center",
   },
   cardHeader: {
     flexDirection: "row",

@@ -84,6 +84,25 @@ export function getDDayInfo(
 }
 
 /**
+ * Render a day count in the most readable Korean unit, prefixed with "약"
+ * once the unit is no longer days (because rounding has happened).
+ *
+ *   < 7        → "N일"             (exact — no "약")
+ *   < 30       → "약 N주"           (round days/7)
+ *   < 365      → "약 N개월"         (round days/30)
+ *   ≥ 365      → "약 N년"           (round days/365)
+ *
+ * Display-only. The caller is responsible for using the raw day count for
+ * any date math — this function intentionally returns just the label.
+ */
+export function formatDaysApprox(days: number): string {
+  if (days < 7) return `${days}일`;
+  if (days < 30) return `약 ${Math.round(days / 7)}주`;
+  if (days < 365) return `약 ${Math.round(days / 30)}개월`;
+  return `약 ${Math.round(days / 365)}년`;
+}
+
+/**
  * Format an ISO timestamp as a Korean relative-time label.
  *   < 1 minute  → "방금 전"
  *   < 1 hour    → "N분 전"

@@ -13,10 +13,8 @@ import {
   Spacing,
 } from "@/constants/theme";
 import type { IngredientDraft } from "@/constants/domain";
-import {
-  METRIC_TO_DAYS,
-  STORAGE_OPTIONS_BY_INGREDIENT_ID,
-} from "@/constants/ingredients-master";
+import { METRIC_TO_DAYS } from "@/constants/ingredients-master";
+import { getMasterSnapshot } from "@/services/ingredientMaster";
 import {
   createIngredients,
   mapIngredientToCreateRequest,
@@ -25,7 +23,7 @@ import {
 import { ocrPending, mapOcrCandidateToDraft } from "@/services/ocr";
 import { CommonActions } from "@react-navigation/native";
 import { useNavigation, useLocalSearchParams } from "expo-router";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import {
   ActivityIndicator,
   Pressable,
@@ -77,6 +75,21 @@ export default function AddConfirmScreen() {
   const [categoryPickerVisible, setCategoryPickerVisible] = useState(false);
   const [editingItemId, setEditingItemId] = useState<string | null>(null);
 
+  // Manual entry (메인 → + → 직접 추가하기) lands here with one blank card.
+  // Auto-open the picker on it so the user doesn't have to tap the card's
+  // name area as a second step. OCR flow lands with pre-matched cards, so
+  // it deliberately skips this — guarded by `isManual`.
+  useEffect(() => {
+    if (!isManual) return;
+    const first = items[0];
+    if (!first || first.ingredientId != null || first.isCustom) return;
+    setEditingItemId(first.id);
+    setCategoryPickerVisible(true);
+    // Mount-only; later additions go through addEmpty which opens the
+    // picker itself.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   const updateItem = (id: string, patch: Partial<IngredientDraft>) => {
     setItems((prev) =>
       prev.map((it) => (it.id === id ? { ...it, ...patch } : it)),
@@ -88,7 +101,14 @@ export default function AddConfirmScreen() {
   };
 
   const addEmpty = () => {
-    setItems((prev) => [...prev, createEmptyDraft()]);
+    // Add a new empty draft and immediately open the ingredient picker on
+    // it — saves the user a second tap. If they back out of the picker the
+    // empty card remains (deletable via the card's own 삭제하기 button), so
+    // no data is lost either way.
+    const draft = createEmptyDraft();
+    setItems((prev) => [...prev, draft]);
+    setEditingItemId(draft.id);
+    setCategoryPickerVisible(true);
   };
 
   const hasAnyError = items.some(
@@ -117,20 +137,12 @@ export default function AddConfirmScreen() {
   const handleConfirm = async () => {
     if (hasAnyError || submitting) return;
 
-    // Temporary: backend contract for custom ("내 재료") items is still TBD,
-    // so block the whole submit if any card is in custom mode. Replace with
-    // a per-item branch in mapIngredientToCreateRequest once the API lands.
-    const hasCustom = items.some((it) => it.isCustom === true);
-    if (hasCustom) {
-      showToast("내 재료 기능은 곧 사용 가능해요");
-      return;
-    }
-
     // Every non-custom draft must be linked to a master ingredient before
     // submit. OCR can return UNMATCHED rows that look filled but have no
     // `ingredientId`; the manual-entry empty case is already caught by
     // `hasAnyError`. Custom cards are intentionally excluded — they have no
-    // master link by design.
+    // master link by design and travel through the customName branch in
+    // mapIngredientToCreateRequest.
     const unmatched = items.some(
       (it) => !it.isCustom && it.ingredientId == null,
     );
@@ -179,7 +191,8 @@ export default function AddConfirmScreen() {
     // ambiguous ones (삼겹살 → 냉장/냉동) leave it null so the user picks
     // deliberately. When auto-filling, also seed the expiry from the master's
     // (min+max)/2 days for that storage.
-    const options = STORAGE_OPTIONS_BY_INGREDIENT_ID.get(entry.id) ?? [];
+    const options =
+      getMasterSnapshot().optionsByIngredientId.get(entry.id) ?? [];
     const uniqueDomains = Array.from(
       new Set(options.map((o) => mapStorageTypeFromApi(o.storageType))),
     );
