@@ -10,11 +10,13 @@ import {
   Shadows,
   Spacing,
 } from "@/constants/theme";
+import { useNotifications } from "@/context/NotificationContext";
 import { useRecipeRecommendation } from "@/context/RecipeRecommendationContext";
-import { saveRecipes, mapDifficultyToBackend, type GeneratedRecipeDto } from "@/services/recipes";
+import { saveRecipes, type GeneratedRecipeDto } from "@/services/recipes";
+import { getErrorMessage } from "@/services/api";
 import { Ionicons } from "@expo/vector-icons";
-import { useRouter } from "expo-router";
-import { useCallback, useEffect, useState } from "react";
+import { useFocusEffect, useNavigation, useRouter } from "expo-router";
+import { useCallback, useEffect, useRef, useState } from "react";
 import {
   BackHandler,
   Dimensions,
@@ -414,16 +416,52 @@ function CompletionView({
 
 export default function RecipeSwipeScreen() {
   const router = useRouter();
+  const navigation = useNavigation();
   const insets = useSafeAreaInsets();
   const { showToast } = useToast();
   const {
     recommendedRecipes,
+    rawRecipes,
     savedRecipes,
     saveRecipe,
     discardRecipe,
     finishSwiping,
     reset,
   } = useRecipeRecommendation();
+  const { markTypeRead } = useNotifications();
+
+  // Buffered save list — pushed during right-swipes, drained as one bulk
+  // POST when the deck completes or the user exits. Ref instead of state so
+  // navigation listeners can read a fresh value without stale closures.
+  const savedDtosRef = useRef<GeneratedRecipeDto[]>([]);
+
+  const flushSaves = useCallback(async () => {
+    const dtos = savedDtosRef.current;
+    if (dtos.length === 0) return;
+    // Clear up front so any re-entry (beforeRemove firing after isComplete
+    // already flushed, etc.) is a no-op instead of double-posting.
+    savedDtosRef.current = [];
+    try {
+      await saveRecipes(dtos);
+      showToast(`${dtos.length}개 레시피가 내 레시피에 저장되었어요`);
+    } catch (e) {
+      showToast(
+        getErrorMessage(
+          e,
+          "레시피 저장에 실패했어요. 잠시 후 다시 시도해 주세요",
+        ),
+      );
+    }
+  }, [showToast]);
+
+  // Entering the swipe screen marks RECIPE_READY notifications as read —
+  // the spec maps that type's "진입 시 읽음" to this screen specifically,
+  // not the recipe tab.
+  useFocusEffect(
+    useCallback(() => {
+      markTypeRead("recipe_ready");
+    }, [markTypeRead]),
+  );
 
   const [currentIndex, setCurrentIndex] = useState(0);
   const [exitModalVisible, setExitModalVisible] = useState(false);
@@ -440,34 +478,38 @@ export default function RecipeSwipeScreen() {
     return () => handler.remove();
   }, []);
 
-  const handleSwipeRight = useCallback(async () => {
-    const recipe = recommendedRecipes[currentIndex];
-    if (recipe) {
-      try {
-        const validMethods = ["볶음", "국/찌개/탕", "찜/조림", "구이/전", "무침/샐러드", "면/만두", "밥/죽/샌드위치", "오븐/베이킹", "기타"];
-        const method = recipe.method || "기타"; 
+  // Auto-flush when the user finishes the whole deck. The CompletionView
+  // shows alongside so the user gets immediate stats; the toast (success
+  // or failure) appears shortly after.
+  useEffect(() => {
+    if (isComplete && savedDtosRef.current.length > 0) {
+      flushSaves();
+    }
+  }, [isComplete, flushSaves]);
 
-        const dto: GeneratedRecipeDto = {
-          recipeName: recipe.title,
-          difficulty: mapDifficultyToBackend(recipe.difficulty),
-          cookingMethod: validMethods.includes(method) ? method : "기타",
-          cookingTime: recipe.time,
-          calories: recipe.kcal,
-          requiredIngredients: (recipe.ingredients || []).map((ing) => ({
-            name: ing,
-            amount: "적당량", // Fallback for simple array format
-          })),
-          instructions: recipe.steps || [],
-        };
-        await saveRecipes([dto]);
-        saveRecipe(recipe);
-        showToast("레시피를 저장했어요");
-      } catch (e: any) {
-        showToast(e.response?.data?.message || "레시피 저장에 실패했습니다.");
-      }
+  // Safety net for any exit path (iOS back gesture, programmatic back, etc.)
+  // that bypasses handleExit/handleComplete. If a regular handler already
+  // flushed, savedDtosRef is empty and this is a no-op.
+  useEffect(() => {
+    const sub = navigation.addListener("beforeRemove", () => {
+      flushSaves();
+    });
+    return sub;
+  }, [navigation, flushSaves]);
+
+  const handleSwipeRight = useCallback(() => {
+    // No reverse-mapping: the raw AI DTO at the matching index is what
+    // we'll eventually POST, byte-for-byte. saveRecipe(recipe) is still
+    // called so the Context's `savedRecipes` UI state (e.g. CompletionView
+    // count) stays accurate during the swipe session.
+    const recipe = recommendedRecipes[currentIndex];
+    const rawDto = rawRecipes[currentIndex];
+    if (recipe && rawDto) {
+      savedDtosRef.current.push(rawDto);
+      saveRecipe(recipe);
     }
     setCurrentIndex((i) => i + 1);
-  }, [currentIndex, recommendedRecipes, saveRecipe, showToast]);
+  }, [currentIndex, recommendedRecipes, rawRecipes, saveRecipe]);
 
   const handleSwipeLeft = useCallback(() => {
     const recipe = recommendedRecipes[currentIndex];

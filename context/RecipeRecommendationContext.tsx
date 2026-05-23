@@ -1,5 +1,9 @@
 import { type Recipe } from "@/constants/domain";
-import { generateAiRecipes, mapDifficulty } from "@/services/recipes";
+import {
+  generateAiRecipes,
+  mapDifficulty,
+  type GeneratedRecipeDto,
+} from "@/services/recipes";
 import { isAxiosError } from "axios";
 import * as Notifications from "expo-notifications";
 import {
@@ -25,6 +29,12 @@ export type RecommendationStatus =
 interface RecipeRecommendationState {
   status: RecommendationStatus;
   recommendedRecipes: Recipe[];
+  /**
+   * AI 응답 원본 DTO. `recommendedRecipes`와 index 1:1 매핑. swipe 화면이
+   * 저장 시 도메인 → DTO 역변환을 거치지 않고 이 배열을 그대로 보내
+   * `requiredIngredients.amount` 같은 필드 손실을 막는다.
+   */
+  rawRecipes: GeneratedRecipeDto[];
   savedRecipes: Recipe[];
   requestedAt: Date | null;
   completedAt: Date | null;
@@ -43,13 +53,17 @@ interface RecipeRecommendationContextValue extends RecipeRecommendationState {
 
 // ─── Notification Setup ───────────────────────────────────────────────────────
 
+// Foreground OS push is suppressed — we surface notifications via an in-app
+// toast inside NotificationContext (and refresh the badge there) instead.
+// Background pushes still display via the OS naturally (this handler only
+// affects foreground display behavior).
 Notifications.setNotificationHandler({
   handleNotification: async () => ({
-    shouldShowAlert: true,
-    shouldPlaySound: true,
+    shouldShowAlert: false,
+    shouldPlaySound: false,
     shouldSetBadge: false,
-    shouldShowBanner: true,
-    shouldShowList: true,
+    shouldShowBanner: false,
+    shouldShowList: false,
   }),
 });
 
@@ -59,6 +73,7 @@ const RecipeRecommendationContext =
   createContext<RecipeRecommendationContextValue>({
     status: "idle",
     recommendedRecipes: [],
+    rawRecipes: [],
     savedRecipes: [],
     requestedAt: null,
     completedAt: null,
@@ -84,6 +99,7 @@ export function RecipeRecommendationProvider({
   const [state, setState] = useState<RecipeRecommendationState>({
     status: "idle",
     recommendedRecipes: [],
+    rawRecipes: [],
     savedRecipes: [],
     requestedAt: null,
     completedAt: null,
@@ -123,11 +139,12 @@ export function RecipeRecommendationProvider({
   }, []);
 
   const handleCompletion = useCallback(
-    (recipes: Recipe[]) => {
+    (recipes: Recipe[], rawList: GeneratedRecipeDto[]) => {
       setState((prev) => ({
         ...prev,
         status: "ready",
         recommendedRecipes: recipes,
+        rawRecipes: rawList,
         completedAt: new Date(),
       }));
 
@@ -156,6 +173,7 @@ export function RecipeRecommendationProvider({
       ...prev,
       status: "loading",
       recommendedRecipes: [],
+      rawRecipes: [],
       savedRecipes: [],
       requestedAt: new Date(),
       completedAt: null,
@@ -163,7 +181,9 @@ export function RecipeRecommendationProvider({
 
     try {
       const generated = await generateAiRecipes();
-      // Map GeneratedRecipeDto back to domain Recipe to feed the swipe UI
+      // Map GeneratedRecipeDto back to domain Recipe to feed the swipe UI.
+      // The raw `generated` list is stored alongside so a save round-trip
+      // can reuse the unmodified DTO instead of reverse-mapping.
       const mappedRecipes: Recipe[] = generated.map((dto, i) => ({
         id: `ai-gen-${Date.now()}-${i}`,
         title: dto.recipeName,
@@ -177,7 +197,7 @@ export function RecipeRecommendationProvider({
         totalCount: dto.requiredIngredients.length,
       }));
 
-      handleCompletion(mappedRecipes);
+      handleCompletion(mappedRecipes, generated);
     } catch (error) {
       console.error("[Recipe Gen Error]", error);
       setState((prev) => ({ ...prev, status: "idle" }));
@@ -210,6 +230,7 @@ export function RecipeRecommendationProvider({
       ...prev,
       status: "idle",
       recommendedRecipes: [],
+      rawRecipes: [],
     }));
   }, []);
 
@@ -217,6 +238,7 @@ export function RecipeRecommendationProvider({
     setState({
       status: "idle",
       recommendedRecipes: [],
+      rawRecipes: [],
       savedRecipes: [],
       requestedAt: null,
       completedAt: null,
