@@ -24,7 +24,25 @@ import axios, {
   AxiosRequestConfig,
   AxiosResponse,
   InternalAxiosRequestConfig,
+  isAxiosError,
 } from "axios";
+
+// ─── Error message helper ────────────────────────────────────────────────────
+
+/**
+ * Extracts a user-facing message from an axios error.
+ * Prefers `error.response.data.message` (backend's localized text), falls back
+ * to the caller-supplied default. Only the `message` field is consulted — we
+ * never echo arbitrary fields from the server payload back to the user.
+ */
+export function getErrorMessage(error: unknown, fallback: string): string {
+  if (isAxiosError(error)) {
+    const msg = (error.response?.data as { message?: unknown } | undefined)
+      ?.message;
+    if (typeof msg === "string" && msg.trim().length > 0) return msg;
+  }
+  return fallback;
+}
 
 // ─── Auth event bus ───────────────────────────────────────────────────────────
 // Avoid coupling the service layer to expo-router. Screens subscribe.
@@ -267,6 +285,17 @@ export type UserInfo = {
   id: number | string;
   email: string;
   role: string;
+  /**
+   * 가입/로그인 경로. 백엔드가 "LOCAL"(이메일) 또는 "google"(소셜)로 보냄.
+   * 대소문자가 일관되지 않으므로 비교 시 항상 `.toLowerCase()` 적용.
+   */
+  provider: "LOCAL" | "google";
+  /**
+   * 서버가 기억하는 전체 푸시 알림 ON/OFF 상태. /me에서 받음.
+   * 토글(PATCH /api/users/me/notification-setting) 성공 시 클라이언트도 같이
+   * 갱신해 다음 화면 렌더에 일관성 유지.
+   */
+  isNotificationEnabled: boolean;
 };
 
 /**
@@ -317,6 +346,26 @@ export async function verifyEmailCode(
   await api.post(AUTH_ENDPOINTS.emailVerify, { email, code }, config);
 }
 
+/**
+ * Sends a temporary password to the user's email. Public endpoint (no auth
+ * header needed) — same shape as `sendEmailCode`. The server returns a
+ * plain-string message we surface as a toast on success. Backend should
+ * answer consistently for both registered and unregistered emails to avoid
+ * account enumeration; we leave that policy to the server and only relay
+ * its response.
+ */
+export async function findPassword(
+  email: string,
+  config?: AxiosRequestConfig,
+): Promise<string> {
+  const { data } = await api.post<string>(
+    "/api/users/password/find",
+    { email },
+    config,
+  );
+  return data;
+}
+
 /** Creates a new account. Server returns a plain string message; we don't surface it. */
 export async function signUp(
   email: string,
@@ -335,6 +384,62 @@ export async function signUp(
 export async function getMyInfo(config?: AxiosRequestConfig): Promise<UserInfo> {
   const { data } = await api.get<UserInfo>("/api/users/me", config);
   return data;
+}
+
+/**
+ * Updates the current user's password. Meaningful for LOCAL provider only —
+ * social accounts have a UUID placeholder server-side. Server returns a
+ * plain-string message; callers distinguish success/failure via try/catch.
+ * On a wrong current password the backend typically replies 400.
+ */
+export async function changePassword(
+  currentPassword: string,
+  newPassword: string,
+  config?: AxiosRequestConfig,
+): Promise<string> {
+  const { data } = await api.patch<string>(
+    "/api/users/me/password",
+    { currentPassword, newPassword },
+    config,
+  );
+  return data;
+}
+
+/**
+ * Toggles the global push-notification setting server-side. Backend tracks
+ * the boolean state; the request body is empty (toggle semantics). Returns
+ * the server's plain-string message.
+ */
+export async function updateNotificationSetting(
+  config?: AxiosRequestConfig,
+): Promise<string> {
+  const { data } = await api.patch<string>(
+    "/api/users/me/notification-setting",
+    undefined,
+    config,
+  );
+  return data;
+}
+
+/**
+ * Permanently deletes the current account.
+ *   LOCAL  → body `{ password }` is required so the server can re-verify.
+ *   GOOGLE → no body (no client-held credential to confirm with).
+ *
+ * On success we mirror logout's cleanup: clear tokens, then emit the logout
+ * event so AuthContext drops `user` and AuthGate routes to /login. On
+ * failure (wrong password, network) the error propagates and tokens are
+ * intentionally NOT cleared — the user can retry without re-logging in.
+ *
+ * The password field is already masked by the SENSITIVE_BODY_KEYS list in
+ * this module's request logger.
+ */
+export async function deleteAccount(password?: string): Promise<void> {
+  await api.delete("/api/users/me", {
+    data: password != null ? { password } : undefined,
+  });
+  await tokenStorage.clearTokens();
+  authEvents.emitLogout();
 }
 
 /**

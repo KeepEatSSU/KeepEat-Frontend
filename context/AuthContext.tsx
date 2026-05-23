@@ -22,6 +22,7 @@ import {
 } from "react";
 import {
   authEvents,
+  deleteAccount as apiDeleteAccount,
   getMyInfo,
   login as apiLogin,
   logout as apiLogout,
@@ -48,7 +49,18 @@ type AuthContextValue = {
    * 일반 login()의 토큰 획득 이후 단계(setTokens → /me → setUser)와 동일.
    */
   loginWithTokens: (accessToken: string, refreshToken: string) => Promise<void>;
+  /**
+   * 푸시 알림 토글 PATCH 성공 후 클라이언트 user의 해당 필드를 동기화.
+   * 네트워크 없이 메모리만 갱신해 다음 화면 렌더에 stale 값이 들어가지 않게 함.
+   */
+  setUserNotificationEnabled: (enabled: boolean) => void;
   logout: () => Promise<void>;
+  /**
+   * 회원 탈퇴. LOCAL 계정은 password 재확인을 함께 보내야 하고, 소셜 계정은
+   * 비워서 호출. 성공 시 logout과 동일하게 token clear + setUser(null)이
+   * 적용돼 AuthGate가 /login으로 라우팅한다.
+   */
+  deleteAccount: (password?: string) => Promise<void>;
 };
 
 const AuthContext = createContext<AuthContextValue | undefined>(undefined);
@@ -152,6 +164,10 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     [],
   );
 
+  const setUserNotificationEnabled = useCallback((enabled: boolean) => {
+    setUser((prev) => (prev ? { ...prev, isNotificationEnabled: enabled } : prev));
+  }, []);
+
   const logout = useCallback(async () => {
     if (BYPASS_ACTIVE) {
       await tokenStorage.clearTokens();
@@ -159,6 +175,20 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       return;
     }
     await apiLogout();
+    setUser(null);
+  }, []);
+
+  const deleteAccount = useCallback(async (password?: string) => {
+    if (BYPASS_ACTIVE) {
+      await tokenStorage.clearTokens();
+      setUser(null);
+      return;
+    }
+    // api.deleteAccount throws on failure (e.g. wrong password) without
+    // touching tokens — we let the caller surface a toast. On success it
+    // already cleared tokens + emitted the logout event; setUser(null)
+    // here is an explicit belt-and-suspenders against any timing gap.
+    await apiDeleteAccount(password);
     setUser(null);
   }, []);
 
@@ -170,9 +200,20 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       login,
       signUp,
       loginWithTokens,
+      setUserNotificationEnabled,
       logout,
+      deleteAccount,
     }),
-    [user, isLoading, login, signUp, loginWithTokens, logout],
+    [
+      user,
+      isLoading,
+      login,
+      signUp,
+      loginWithTokens,
+      setUserNotificationEnabled,
+      logout,
+      deleteAccount,
+    ],
   );
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;

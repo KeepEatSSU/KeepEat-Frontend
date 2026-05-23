@@ -1,44 +1,117 @@
 /**
  * KeepEat — top-right header cluster (notification bell + profile avatar).
  *
- * Wraps NotificationBell, NotificationPopup, and ProfileModal behind a single
- * mount so every tab gets the same affordance with one line of JSX. Owns its
- * own notifications + popup/profile open state because there's no upstream
- * store yet — when the backend lands, swap the `useState(MOCK_NOTIFICATIONS)`
- * for a fetch and the rest of the surface area stays the same.
+ * Renders the bell + profile UI and connects them to shared state:
+ *   - notification data + actions come from `useNotifications()` (lifted to
+ *     NotificationContext so every tab's instance sees the same unread count)
+ *   - auth (logout, deleteAccount) from `useAuth()`
  *
- * State sharing
- *   Each tab mounts its own instance, so read-state changes in the fridge tab
- *   do NOT propagate to the recipe tab's bell. That's an accepted trade-off
- *   for the mock phase; once the server is the source of truth, both tabs
- *   will see the same unread count automatically.
+ * Each tab still mounts its own AppHeaderRight — accepted trade-off — but
+ * the badge count is now consistent across tabs because the underlying
+ * state lives in a single root Provider.
  */
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { Pressable, StyleSheet, View } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 import { NotificationBell } from "@/components/NotificationBell";
 import { NotificationPopup } from "@/components/NotificationPopup";
 import { ProfileModal } from "@/components/ProfileModal";
+import { ConfirmModal } from "@/components/ConfirmModal";
+import { DeletePasswordModal } from "@/components/DeletePasswordModal";
+import { useToast } from "@/components/Toast";
 import { useAuth } from "@/context/AuthContext";
-import { MOCK_NOTIFICATIONS } from "@/mocks/notifications";
-import type { AppNotification } from "@/constants/domain";
+import { useNotifications } from "@/context/NotificationContext";
+import { getErrorMessage } from "@/services/api";
+import { clearRecentIngredients } from "@/services/recentIngredients";
 import { Colors, Radius, Spacing } from "@/constants/theme";
 
 export function AppHeaderRight() {
-  const { logout } = useAuth();
-  const [notifications, setNotifications] = useState<AppNotification[]>(
-    () => MOCK_NOTIFICATIONS,
-  );
+  const { user, logout, deleteAccount } = useAuth();
+  const { showToast } = useToast();
+  const {
+    items,
+    unreadCount,
+    hasNext,
+    loading,
+    refresh,
+    loadMore,
+    markRead,
+    markAllRead,
+  } = useNotifications();
+
   const [notifVisible, setNotifVisible] = useState(false);
   const [profileVisible, setProfileVisible] = useState(false);
 
-  const unreadCount = notifications.filter((n) => !n.isRead).length;
+  // Delete-account flow: only one of the two confirm modals is up at a time.
+  // For LOCAL accounts we go straight to the password modal (it doubles as
+  // the confirmation), for GOOGLE we show a plain ConfirmModal (no password
+  // exists client-side to verify with).
+  const [googleConfirmVisible, setGoogleConfirmVisible] = useState(false);
+  const [passwordModalVisible, setPasswordModalVisible] = useState(false);
+  const [deleteSubmitting, setDeleteSubmitting] = useState(false);
 
-  const handleNotificationRead = (id: number) => {
-    setNotifications((prev) =>
-      prev.map((n) => (n.id === id ? { ...n, isRead: true } : n)),
-    );
+  // Open-modal transition: server-truth refresh so newly arrived notifications
+  // (and reads done elsewhere) appear without requiring a re-login. The
+  // Provider's `refresh` has a stable identity, so this effect only fires on
+  // notifVisible change — not on every items/loading update.
+  useEffect(() => {
+    if (notifVisible) {
+      refresh();
+    }
+  }, [notifVisible, refresh]);
+
+  // Backend mixes casing ("LOCAL" / "google") — normalize.
+  const isGoogleAccount =
+    (user?.provider ?? "").toLowerCase() === "google";
+
+  const handleDeleteAccountStart = () => {
+    setProfileVisible(false);
+    if (isGoogleAccount) {
+      setGoogleConfirmVisible(true);
+    } else {
+      setPasswordModalVisible(true);
+    }
+  };
+
+  const finishDeleteSuccess = async () => {
+    // Local caches that don't belong to the next user. Token clearing +
+    // setUser(null) is already handled inside deleteAccount.
+    await clearRecentIngredients();
+    showToast("탈퇴가 완료되었어요");
+  };
+
+  const handleDeleteGoogleConfirm = async () => {
+    if (deleteSubmitting) return;
+    setDeleteSubmitting(true);
+    try {
+      await deleteAccount();
+      setGoogleConfirmVisible(false);
+      await finishDeleteSuccess();
+    } catch (err) {
+      // Keep the modal open so the user can retry; surface the server's
+      // message via the shared getErrorMessage helper (which never exposes
+      // the raw error body).
+      showToast(getErrorMessage(err, "탈퇴에 실패했어요"));
+    } finally {
+      setDeleteSubmitting(false);
+    }
+  };
+
+  const handleDeleteLocalConfirm = async (password: string) => {
+    if (deleteSubmitting) return;
+    setDeleteSubmitting(true);
+    try {
+      await deleteAccount(password);
+      setPasswordModalVisible(false);
+      await finishDeleteSuccess();
+    } catch (err) {
+      // Wrong password / network → modal stays open, password field stays
+      // filled. User can retry without re-opening.
+      showToast(getErrorMessage(err, "탈퇴에 실패했어요"));
+    } finally {
+      setDeleteSubmitting(false);
+    }
   };
 
   return (
@@ -64,17 +137,37 @@ export function AppHeaderRight() {
           setProfileVisible(false);
           await logout();
         }}
-        onDeleteAccount={() => {
-          setProfileVisible(false);
-          // TODO: delete account logic
-        }}
+        onDeleteAccount={handleDeleteAccountStart}
+      />
+
+      <ConfirmModal
+        visible={googleConfirmVisible}
+        title="회원 탈퇴"
+        subtitle={"정말 탈퇴하시겠어요?\n모든 데이터가 삭제되며 복구할 수 없어요."}
+        confirmLabel="탈퇴하기"
+        cancelLabel="취소"
+        destructive
+        onConfirm={handleDeleteGoogleConfirm}
+        onCancel={() => setGoogleConfirmVisible(false)}
+      />
+
+      <DeletePasswordModal
+        visible={passwordModalVisible}
+        submitting={deleteSubmitting}
+        onConfirm={handleDeleteLocalConfirm}
+        onCancel={() => setPasswordModalVisible(false)}
       />
 
       <NotificationPopup
         visible={notifVisible}
         onClose={() => setNotifVisible(false)}
-        notifications={notifications.filter((n) => !n.isRead)}
-        onNotificationRead={handleNotificationRead}
+        notifications={items}
+        unreadCount={unreadCount}
+        hasNext={hasNext}
+        loading={loading}
+        onLoadMore={loadMore}
+        onNotificationRead={markRead}
+        onMarkAllRead={markAllRead}
       />
     </View>
   );

@@ -1,4 +1,5 @@
 import { AppHeaderLogo } from "@/components/AppHeaderLogo";
+import { FindPasswordModal } from "@/components/FindPasswordModal";
 import {
   Colors,
   FontSize,
@@ -9,10 +10,10 @@ import {
   Spacing,
 } from "@/constants/theme";
 import { useAuth } from "@/context/AuthContext";
+import { findPassword, getErrorMessage } from "@/services/api";
 import { startGoogleLogin } from "@/services/googleAuth";
 import { useToast } from "@/components/Toast";
 import { Ionicons } from "@expo/vector-icons";
-import { isAxiosError } from "axios";
 import { useRouter } from "expo-router";
 import { useRef, useState } from "react";
 import {
@@ -43,6 +44,28 @@ export default function LoginScreen() {
   const [showPassword, setShowPassword] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [googleSubmitting, setGoogleSubmitting] = useState(false);
+  const [findPwModalVisible, setFindPwModalVisible] = useState(false);
+  const [findPwSubmitting, setFindPwSubmitting] = useState(false);
+
+  const handleFindPassword = async (inputEmail: string) => {
+    if (findPwSubmitting) return;
+    setFindPwSubmitting(true);
+    try {
+      // Server returns a plain-string instruction message — surface it
+      // verbatim so the user sees exactly what the backend tells them
+      // (e.g. "임시 비밀번호가 이메일로 발송되었습니다").
+      const message = await findPassword(inputEmail);
+      setFindPwModalVisible(false);
+      showToast(message || "임시 비밀번호가 이메일로 발송되었어요");
+    } catch (err) {
+      // Keep the modal open so the user can fix the email and retry.
+      // getErrorMessage extracts only `message` from the response body —
+      // never the raw payload.
+      showToast(getErrorMessage(err, "요청에 실패했어요"));
+    } finally {
+      setFindPwSubmitting(false);
+    }
+  };
 
   const handleLogin = async () => {
     Keyboard.dismiss();
@@ -53,11 +76,11 @@ export default function LoginScreen() {
       await login(email.trim(), password);
       router.replace("/(tabs)");
     } catch (e) {
-      if (isAxiosError(e) && e.response?.status === 401) {
-        setError("아이디 또는 비밀번호가 일치하지 않습니다");
-      } else {
-        setError("로그인 중 문제가 발생했어요. 잠시 후 다시 시도해 주세요");
-      }
+      // Surface the server's `message` field when present (e.g.
+      // "이메일 또는 비밀번호가 일치하지 않습니다." for a 401, or the
+      // backend's own copy for other failures); fall back to a generic
+      // line when there's no body to read.
+      setError(getErrorMessage(e, "로그인에 실패했어요"));
     } finally {
       setSubmitting(false);
     }
@@ -85,6 +108,7 @@ export default function LoginScreen() {
   };
 
   return (
+    <>
     <TouchableWithoutFeedback onPress={Keyboard.dismiss}>
       <KeyboardAvoidingView
         style={[styles.screen, { paddingTop: insets.top }]}
@@ -208,7 +232,10 @@ export default function LoginScreen() {
 
           {/* Sub actions */}
           <View style={styles.subActions}>
-            <Pressable style={{ padding: Spacing.xs }}>
+            <Pressable
+              onPress={() => setFindPwModalVisible(true)}
+              style={{ padding: Spacing.xs }}
+            >
               <Text style={styles.linkText}>비밀번호 찾기</Text>
             </Pressable>
             <Text style={styles.linkDivider}>|</Text>
@@ -257,6 +284,14 @@ export default function LoginScreen() {
         </ScrollView>
       </KeyboardAvoidingView>
     </TouchableWithoutFeedback>
+
+    <FindPasswordModal
+      visible={findPwModalVisible}
+      submitting={findPwSubmitting}
+      onSubmit={handleFindPassword}
+      onCancel={() => setFindPwModalVisible(false)}
+    />
+    </>
   );
 }
 
