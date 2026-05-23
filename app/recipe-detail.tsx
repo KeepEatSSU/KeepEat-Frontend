@@ -24,14 +24,34 @@ import {
 } from "@/constants/theme";
 import type {
   IngredientDraft,
+  ReactionType,
 } from "@/constants/domain";
-import { getRecipeDetail, mapDifficulty, type RecipeDetailDto, type RecipeIngredientDto } from "@/services/recipes";
+import {
+  addToMyRecipes,
+  deleteMyRecipes,
+  getRecipeDetail,
+  mapDifficulty,
+  toggleReaction,
+  type RecipeDetailDto,
+  type RecipeIngredientDto,
+} from "@/services/recipes";
+import { getErrorMessage } from "@/services/api";
+import {
+  createIngredients,
+  getOwnedIngredientsByRecipe,
+  mapIngredientToCreateRequest,
+} from "@/services/userIngredients";
+import { getMasterSnapshot } from "@/services/ingredientMaster";
 import { IngredientEditCard } from "@/components/IngredientEditCard";
+import { ConfirmModal } from "@/components/ConfirmModal";
 import { useToast } from "@/components/Toast";
 import { ErrorScreen } from "@/components/ErrorScreen";
 
-export interface MappedRecipeDetail extends RecipeDetailDto {
+export interface MappedRecipeDetail
+  extends Omit<RecipeDetailDto, "difficulty"> {
   name: string;
+  /** mapDifficulty 결과 — DTO의 "상/중/하" union을 사람이 읽는 라벨로 변환. */
+  difficulty: string;
   ingredients: RecipeIngredientDto[];
   steps: string[];
   time: string;
@@ -49,13 +69,51 @@ function parseAmount(amountStr: string): { num: number; unit: string } {
 
 function formatAmount(amountStr: string, portions: number): string {
   if (portions === 1) return amountStr;
-  
+
   const parsed = parseAmount(amountStr);
   if (isNaN(parsed.num)) return amountStr; // If it's just "적당량", return as is
 
   const scaled = parsed.num * portions;
   const scaledStr = scaled % 1 === 0 ? String(scaled) : scaled.toFixed(1);
   return `${scaledStr}${parsed.unit}`;
+}
+
+// Reaction toggle semantics (same as explore.tsx's card-level helper):
+//   current === type → clear  (count-1)
+//   current === null → add    (count+1)
+//   current ≠ type   → swap   (other-1, this+1)
+// Operates on whatever shape carries { myReaction, likeCount, dislikeCount }.
+function applyReaction<
+  T extends {
+    myReaction: ReactionType | null;
+    likeCount: number;
+    dislikeCount: number;
+  },
+>(item: T, type: ReactionType): T {
+  const cur = item.myReaction;
+  let { likeCount, dislikeCount } = item;
+  let next: ReactionType | null;
+
+  if (cur === type) {
+    next = null;
+    if (type === "LIKE") likeCount -= 1;
+    else dislikeCount -= 1;
+  } else if (cur === null) {
+    next = type;
+    if (type === "LIKE") likeCount += 1;
+    else dislikeCount += 1;
+  } else {
+    next = type;
+    if (type === "LIKE") {
+      likeCount += 1;
+      dislikeCount = Math.max(0, dislikeCount - 1);
+    } else {
+      dislikeCount += 1;
+      likeCount = Math.max(0, likeCount - 1);
+    }
+  }
+
+  return { ...item, myReaction: next, likeCount, dislikeCount };
 }
 
 // ─── Sub-components ───────────────────────────────────────────────────────────
@@ -136,6 +194,12 @@ function MissingRow({
     Linking.openURL(url);
   };
 
+  // PENDING ingredients are still being onboarded server-side; hide the
+  // "추가" affordance entirely so the user can't try to register a row
+  // that the backend will reject. The row otherwise renders identically
+  // to ACTIVE missing items — no inline badge.
+  const isPending = item.status === "PENDING";
+
   return (
     <View style={styles.ingredientRow}>
       <View style={styles.ingredientLeft}>
@@ -158,16 +222,18 @@ function MissingRow({
         >
           <Text style={styles.buyChipText}>구매</Text>
         </Pressable>
-        <Pressable
-          onPress={onAddToFridge}
-          style={({ pressed }) => [
-            styles.actionChip,
-            styles.addChip,
-            pressed && { opacity: 0.7 },
-          ]}
-        >
-          <Text style={styles.addChipText}>추가</Text>
-        </Pressable>
+        {!isPending && (
+          <Pressable
+            onPress={onAddToFridge}
+            style={({ pressed }) => [
+              styles.actionChip,
+              styles.addChip,
+              pressed && { opacity: 0.7 },
+            ]}
+          >
+            <Text style={styles.addChipText}>추가</Text>
+          </Pressable>
+        )}
       </View>
     </View>
   );
@@ -245,17 +311,36 @@ export default function RecipeDetailScreen() {
       setIsLoading(true);
       setIsError(false);
       try {
-        const data = await getRecipeDetail(Number(id));
-        // Map backend DTO to the expected frontend shape
-        const mappedRecipe = {
+        const recipeId = Number(id);
+        // Fetch detail + owned-match in parallel. The owned-match endpoint
+        // is the authoritative source for the 보유 X/Y count; if it fails
+        // we silently fall back to the DTO's per-ingredient `isOwned`.
+        const [data, ownedItems] = await Promise.all([
+          getRecipeDetail(recipeId),
+          getOwnedIngredientsByRecipe(recipeId).catch(() => null),
+        ]);
+
+        const ownedSet =
+          ownedItems !== null
+            ? new Set(ownedItems.map((o) => o.name))
+            : null;
+
+        const mappedIngredients = (data.requiredIngredients || []).map(
+          (ing) =>
+            ownedSet !== null
+              ? { ...ing, isOwned: ownedSet.has(ing.name) }
+              : ing,
+        );
+
+        const mappedRecipe: MappedRecipeDetail = {
           ...data,
           name: data.recipeName,
-          ingredients: data.requiredIngredients || [],
+          ingredients: mappedIngredients,
           steps: data.instructions || [],
           difficulty: mapDifficulty(data.difficulty),
           time: data.cookingTime || "15분",
         };
-        setRecipe(mappedRecipe as any); // using as any to keep existing component logic working for now
+        setRecipe(mappedRecipe);
       } catch (error) {
         showToast("레시피 정보를 불러오지 못했어요.");
         setIsError(true);
@@ -268,7 +353,12 @@ export default function RecipeDetailScreen() {
   }, [id, showToast]);
 
   const [portions, setPortions] = useState(1);
-  const [isSaved, setIsSaved] = useState(true);
+  // True while the "내 레시피에 추가" PATCH is in-flight — gates the button
+  // and shows an ActivityIndicator so the user can't double-tap.
+  const [isAddingToMyRecipes, setIsAddingToMyRecipes] = useState(false);
+  // Unregister (내 레시피에서 해제) flow — confirm modal + in-flight gate.
+  const [unregisterModalVisible, setUnregisterModalVisible] = useState(false);
+  const [unregistering, setUnregistering] = useState(false);
 
   // ── Add-to-fridge modal ──
   const [addModalVisible, setAddModalVisible] = useState(false);
@@ -286,10 +376,17 @@ export default function RecipeDetailScreen() {
   const sheetTranslateY = useRef(new Animated.Value(SHEET_HEIGHT)).current;
 
   const openAddModal = (ingredientName: string) => {
+    // Best-effort master link: if the recipe ingredient name matches a row
+    // in the catalog, register the new fridge entry as that master so it
+    // gets an icon + storage defaults + appears under the right category.
+    // No match → falls through as a custom ("내 재료") item.
+    const masterId = getMasterSnapshot().byName.get(ingredientName)?.id;
     setDraftItem({
       id: String(Date.now()),
       name: ingredientName,
-      nickname: ingredientName,
+      nickname: masterId != null ? "" : ingredientName,
+      ingredientId: masterId,
+      isCustom: masterId == null,
       quantity: null,
       unit: "g",
       storage: "fridge",
@@ -334,11 +431,68 @@ export default function RecipeDetailScreen() {
     [backdropOpacity, sheetTranslateY],
   );
 
-  const handleAddToFridge = () => {
-    closeAddModal(() => {
-      showToast(`${draftItem.name}이(가) 냉장고에 추가되었습니다`);
-      // TODO: persist to fridge state
-    });
+  const handleAddToFridge = async () => {
+    try {
+      const req = mapIngredientToCreateRequest(draftItem);
+      await createIngredients([req]);
+      closeAddModal(() =>
+        showToast(`${draftItem.name}을(를) 냉장고에 추가했어요`),
+      );
+    } catch (e) {
+      showToast(getErrorMessage(e, "냉장고 추가에 실패했어요"));
+    }
+  };
+
+  // Optimistic like/dislike with rollback. Snapshot the current recipe so a
+  // failed PATCH restores the exact pre-tap state — same pattern as the
+  // explore tab's card-level handler.
+  const handleReact = async (type: ReactionType) => {
+    if (!recipe) return;
+    const original = recipe;
+    setRecipe((prev) => (prev ? applyReaction(prev, type) : prev));
+    try {
+      await toggleReaction(recipe.recipeId, type);
+    } catch (e) {
+      setRecipe(original);
+      showToast(getErrorMessage(e, "반응 처리에 실패했어요"));
+    }
+  };
+
+  const handleAddToMyRecipes = async () => {
+    if (!recipe || isAddingToMyRecipes) return;
+    setIsAddingToMyRecipes(true);
+    try {
+      await addToMyRecipes([recipe.recipeId]);
+      // Flip the flag in-place so the CTA switches over to the cooking
+      // buttons without a refetch round-trip.
+      setRecipe((prev) =>
+        prev ? { ...prev, isRegisteredMyRecipe: true } : prev,
+      );
+      showToast("내 레시피에 추가되었어요");
+    } catch (e) {
+      showToast(getErrorMessage(e, "내 레시피 추가에 실패했어요"));
+    } finally {
+      setIsAddingToMyRecipes(false);
+    }
+  };
+
+  const handleUnregister = async () => {
+    if (!recipe || unregistering) return;
+    setUnregistering(true);
+    try {
+      await deleteMyRecipes([recipe.recipeId]);
+      // Flip the flag inline → CTA reverts to "내 레시피에 추가". The
+      // recipe row itself stays on screen; user can re-add anytime.
+      setRecipe((prev) =>
+        prev ? { ...prev, isRegisteredMyRecipe: false } : prev,
+      );
+      setUnregisterModalVisible(false);
+      showToast("내 레시피에서 제거되었어요");
+    } catch (e) {
+      showToast(getErrorMessage(e, "제거에 실패했어요"));
+    } finally {
+      setUnregistering(false);
+    }
   };
 
   if (isError) {
@@ -379,22 +533,29 @@ export default function RecipeDetailScreen() {
         >
           <Ionicons name="arrow-back" size={24} color={Colors.onSurface} />
         </Pressable>
-        <Pressable
-          onPress={() => {
-            setIsSaved((v) => !v);
-            // TODO: isSaved가 false로 변할 때 "찜 목록에서 제거되었습니다" Toast
-          }}
-          style={({ pressed }) => [
-            styles.headerBtn,
-            pressed && { opacity: 0.6 },
-          ]}
-        >
-          <Ionicons
-            name={isSaved ? "bookmark" : "bookmark-outline"}
-            size={24}
-            color={isSaved ? Colors.primary : Colors.onSurface}
-          />
-        </Pressable>
+        {/* Right slot — when this recipe is already in 내 레시피, surface
+            a trash affordance so the user can remove it without going to
+            the recipe tab. Otherwise an empty same-size spacer keeps the
+            back button visually centered against the screen. */}
+        {recipe.isRegisteredMyRecipe ? (
+          <Pressable
+            onPress={() => setUnregisterModalVisible(true)}
+            accessibilityRole="button"
+            accessibilityLabel="내 레시피에서 제거"
+            style={({ pressed }) => [
+              styles.headerBtn,
+              pressed && { opacity: 0.6 },
+            ]}
+          >
+            <Ionicons
+              name="trash-outline"
+              size={22}
+              color={Colors.onSurfaceVariant}
+            />
+          </Pressable>
+        ) : (
+          <View style={styles.headerBtn} />
+        )}
       </View>
 
       <ScrollView
@@ -406,7 +567,10 @@ export default function RecipeDetailScreen() {
           <Text style={styles.heroTitle}>{recipe.name}</Text>
         </View>
 
-        {/* ── Meta Chips ── */}
+        {/* ── Meta Chips ──
+            Calories chip only renders when the DTO has a real positive
+            value; the previous "적당량 kcal" placeholder was a hardcoded
+            string that survived even when the field was a number. */}
         <View style={styles.metaRow}>
           <View style={styles.metaChip}>
             <Ionicons name="nutrition-outline" size={15} color={Colors.primary} />
@@ -415,19 +579,81 @@ export default function RecipeDetailScreen() {
             </Text>
             <Text style={styles.metaChipLabel}>보유</Text>
           </View>
-          {/* Mock values for generic metadata since backend only gives name/desc currently */}
-          <View style={styles.metaChip}>
-            <Ionicons name="flame-outline" size={15} color={Colors.outline} />
-            <Text style={styles.metaChipText}>적당량 kcal</Text>
-          </View>
+          {recipe.calories > 0 && (
+            <View style={styles.metaChip}>
+              <Ionicons name="flame-outline" size={15} color={Colors.outline} />
+              <Text style={styles.metaChipText}>{recipe.calories}kcal</Text>
+            </View>
+          )}
           <View style={styles.metaChip}>
             <Ionicons name="speedometer-outline" size={15} color={Colors.outline} />
-            <Text style={styles.metaChipText}>{(recipe as any).difficulty || "초급"}</Text>
+            <Text style={styles.metaChipText}>{recipe.difficulty}</Text>
           </View>
           <View style={styles.metaChip}>
             <Ionicons name="time-outline" size={15} color={Colors.outline} />
-            <Text style={styles.metaChipText}>{(recipe as any).time || "15분"}</Text>
+            <Text style={styles.metaChipText}>{recipe.time}</Text>
           </View>
+        </View>
+
+        {/* ── Reactions ── */}
+        <View style={styles.reactionRow}>
+          <Pressable
+            onPress={() => handleReact("LIKE")}
+            hitSlop={8}
+            style={({ pressed }) => [
+              styles.reactionBtn,
+              pressed && { opacity: 0.6 },
+            ]}
+          >
+            <Ionicons
+              name={recipe.myReaction === "LIKE" ? "heart" : "heart-outline"}
+              size={24}
+              color={
+                recipe.myReaction === "LIKE"
+                  ? Colors.primary
+                  : Colors.onSurfaceVariant
+              }
+            />
+            <Text
+              style={[
+                styles.reactionCount,
+                recipe.myReaction === "LIKE" && styles.reactionCountActive,
+              ]}
+            >
+              {recipe.likeCount ?? 0}
+            </Text>
+          </Pressable>
+          <Pressable
+            onPress={() => handleReact("DISLIKE")}
+            hitSlop={8}
+            style={({ pressed }) => [
+              styles.reactionBtn,
+              pressed && { opacity: 0.6 },
+            ]}
+          >
+            <Ionicons
+              name={
+                recipe.myReaction === "DISLIKE"
+                  ? "thumbs-down"
+                  : "thumbs-down-outline"
+              }
+              size={24}
+              color={
+                recipe.myReaction === "DISLIKE"
+                  ? Colors.error
+                  : Colors.onSurfaceVariant
+              }
+            />
+            <Text
+              style={[
+                styles.reactionCount,
+                recipe.myReaction === "DISLIKE" &&
+                  styles.reactionCountDislike,
+              ]}
+            >
+              {recipe.dislikeCount ?? 0}
+            </Text>
+          </Pressable>
         </View>
 
         {/* ── Portions Stepper ── */}
@@ -473,42 +699,85 @@ export default function RecipeDetailScreen() {
         </View>
       </ScrollView>
 
-      {/* ── Bottom CTA ── */}
+      {/* ── Bottom CTA ──
+          Two modes:
+          • Not yet in 내 레시피  → single "내 레시피에 추가" button.
+          • Already in 내 레시피 → original cooking-flow buttons. Cooking
+            entry is gated behind ownership so the user always has a
+            persisted recipe row to attribute the cook to. */}
       <View
         style={[
           styles.bottomCta,
           { paddingBottom: Math.max(insets.bottom, 12) },
         ]}
       >
-        <Pressable
-          onPress={() =>
-            router.push({
-              pathname: "/cooking-ready",
-              params: { id: recipe.recipeId },
-            } as never)
-          }
-          style={({ pressed }) => [
-            styles.ctaButton,
-            pressed && { opacity: 0.85, transform: [{ scale: 0.98 }] },
-          ]}
-        >
-          <Text style={styles.ctaText}>요리 시작하기</Text>
-        </Pressable>
-        <Pressable
-          onPress={() =>
-            router.push({
-              pathname: "/cooking-complete",
-              params: { id: recipe.recipeId },
-            } as never)
-          }
-          style={({ pressed }) => [
-            styles.shortcutBtn,
-            pressed && { opacity: 0.5 },
-          ]}
-        >
-          <Text style={styles.shortcutText}>바로 완성하기</Text>
-        </Pressable>
+        {!recipe.isRegisteredMyRecipe ? (
+          <Pressable
+            onPress={handleAddToMyRecipes}
+            disabled={isAddingToMyRecipes}
+            style={({ pressed }) => [
+              styles.ctaButton,
+              isAddingToMyRecipes && styles.ctaButtonDisabled,
+              pressed &&
+                !isAddingToMyRecipes && {
+                  opacity: 0.85,
+                  transform: [{ scale: 0.98 }],
+                },
+            ]}
+          >
+            {isAddingToMyRecipes ? (
+              <ActivityIndicator color={Colors.onPrimary} />
+            ) : (
+              <Text style={styles.ctaText}>내 레시피에 추가</Text>
+            )}
+          </Pressable>
+        ) : (
+          <>
+            <Pressable
+              onPress={() =>
+                router.push({
+                  pathname: "/cooking-ready",
+                  params: { id: recipe.recipeId },
+                } as never)
+              }
+              style={({ pressed }) => [
+                styles.ctaButton,
+                pressed && { opacity: 0.85, transform: [{ scale: 0.98 }] },
+              ]}
+            >
+              <Text style={styles.ctaText}>요리 시작하기</Text>
+            </Pressable>
+            <Pressable
+              onPress={() =>
+                router.push({
+                  pathname: "/cooking-complete",
+                  params: { id: recipe.recipeId },
+                } as never)
+              }
+              style={({ pressed }) => [
+                styles.shortcutBtn,
+                pressed && { opacity: 0.5 },
+              ]}
+            >
+              <Text style={styles.shortcutText}>바로 완성하기</Text>
+            </Pressable>
+          </>
+        )}
       </View>
+
+      {/* ── Unregister Confirm ── */}
+      <ConfirmModal
+        visible={unregisterModalVisible}
+        title="내 레시피에서 제거"
+        subtitle={"이 레시피를 내 레시피에서\n제거할까요?"}
+        confirmLabel="제거하기"
+        cancelLabel="취소"
+        destructive
+        onConfirm={handleUnregister}
+        onCancel={() =>
+          !unregistering && setUnregisterModalVisible(false)
+        }
+      />
 
       {/* ── Add to Fridge Modal ── */}
       <Modal
@@ -657,6 +926,37 @@ const styles = StyleSheet.create({
     fontSize: FontSize.bodySm,
     fontWeight: FontWeight.medium,
     color: Colors.onSurfaceVariant,
+  },
+
+  // Reactions — centered + emphasized as a hero affordance under the meta
+  // row. Buttons get generous padding so the touch target reads loud and
+  // the inactive glyphs use onSurfaceVariant (heavier than outline) for a
+  // more present resting state.
+  reactionRow: {
+    flexDirection: "row",
+    justifyContent: "center",
+    gap: 28,
+    marginBottom: Spacing.xl,
+  },
+  reactionBtn: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
+    paddingVertical: 8,
+    paddingHorizontal: 12,
+  },
+  reactionCount: {
+    fontSize: FontSize.bodyLg,
+    fontWeight: FontWeight.medium,
+    color: Colors.onSurfaceVariant,
+  },
+  reactionCountActive: {
+    color: Colors.primary,
+    fontWeight: FontWeight.bold,
+  },
+  reactionCountDislike: {
+    color: Colors.error,
+    fontWeight: FontWeight.bold,
   },
 
   // Portions stepper
@@ -849,6 +1149,9 @@ const styles = StyleSheet.create({
     alignItems: "center",
     justifyContent: "center",
     ...Shadows.fab,
+  },
+  ctaButtonDisabled: {
+    backgroundColor: Colors.surfaceContainerHigh,
   },
   ctaText: {
     fontSize: FontSize.bodyLg,

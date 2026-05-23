@@ -28,9 +28,9 @@ import type {
   StorageType,
 } from "@/constants/domain";
 import {
-  CATEGORIES,
-  SUB_CATEGORIES,
-} from "@/constants/ingredients-master";
+  getMasterSnapshot,
+  type ResolvedSnapshot,
+} from "@/services/ingredientMaster";
 
 // ─── Backend DTOs (kept private to this module) ──────────────────────────────
 
@@ -38,6 +38,10 @@ type ApiStorageType = "실온" | "냉장" | "냉동";
 
 interface UserIngredientResponse {
   id: number;
+  /** Master ingredient ID — null/absent for custom ("내 재료") items. */
+  ingredientId?: number | null;
+  /** True when this row was added outside the master catalog. */
+  isCustom?: boolean;
   name: string;
   customName?: string;
   categoryName: string;
@@ -51,7 +55,10 @@ interface UserIngredientResponse {
 }
 
 export interface UserIngredientCreateRequest {
-  ingredientId: number;
+  /** Master ID for catalog items. **Null** for custom ("내 재료") items —
+   * the server differentiates the two branches on this field, and the
+   * accompanying `customName` becomes the item's display name. */
+  ingredientId: number | null;
   storageType: ApiStorageType;
   purchaseDate: string;
   expiryDate?: string;
@@ -123,19 +130,37 @@ function toIsoDate(d: Date): string {
 // guaranteed to belong to one of these, so an unmatched value is a data
 // drift signal — we log it in dev and pass the raw string through so the
 // item still appears under "전체" rather than getting silently dropped.
+//
+// Lookups are rebuilt when the master snapshot reference changes (seed →
+// server hand-off), keyed by identity so we don't pay the build cost per call.
 
-const CATEGORY_NAMES = new Set(CATEGORIES.map((c) => c.name));
-const SUBCATEGORY_TO_CATEGORY = new Map<string, string>(
-  SUB_CATEGORIES.flatMap((sc) => {
-    const parent = CATEGORIES.find((c) => c.id === sc.categoryId);
-    return parent ? [[sc.name, parent.name] as [string, string]] : [];
-  }),
-);
+let cachedSnapshotRef: ResolvedSnapshot | null = null;
+let cachedCategoryNames: Set<string> = new Set();
+let cachedSubcategoryToCategory: Map<string, string> = new Map();
+
+function getCategoryLookups(): {
+  names: Set<string>;
+  subToCat: Map<string, string>;
+} {
+  const snap = getMasterSnapshot();
+  if (snap !== cachedSnapshotRef) {
+    cachedSnapshotRef = snap;
+    cachedCategoryNames = new Set(snap.categories.map((c) => c.name));
+    cachedSubcategoryToCategory = new Map(
+      snap.subCategories.flatMap((sc) => {
+        const parent = snap.categories.find((c) => c.id === sc.categoryId);
+        return parent ? [[sc.name, parent.name] as [string, string]] : [];
+      }),
+    );
+  }
+  return { names: cachedCategoryNames, subToCat: cachedSubcategoryToCategory };
+}
 
 export function categoryFromApi(apiName: string | undefined): string {
   if (!apiName) return "";
-  if (CATEGORY_NAMES.has(apiName)) return apiName;
-  const viaSub = SUBCATEGORY_TO_CATEGORY.get(apiName);
+  const { names, subToCat } = getCategoryLookups();
+  if (names.has(apiName)) return apiName;
+  const viaSub = subToCat.get(apiName);
   if (viaSub) return viaSub;
   if (__DEV__) {
     console.warn(
@@ -156,40 +181,61 @@ export function mapIngredientFromApi(dto: UserIngredientResponse): Ingredient {
   // into one of the 10 master categories. See `categoryFromApi`.
   const canonical = categoryFromApi(dto.subCategoryName ?? dto.categoryName);
 
+  // Master vs custom name semantics:
+  //   Master items — `dto.name` holds the catalog display name; `customName`
+  //     (if set) is the user's optional nickname. Map straight through.
+  //   Custom items — there is no catalog row, so `dto.name` is empty/absent
+  //     and the user-typed display name lives in `customName`. We mirror it
+  //     into both `name` (so the card's heroName + detail title show it) AND
+  //     `nickname` (so the card's "nickname !== name" guard suppresses the
+  //     subtitle row, and detail's nickname TextInput pre-fills with the
+  //     editable display name — patching it back through the existing
+  //     `nickname → customName` update path).
+  const customName = dto.customName ?? "";
+  const isCustomRow = dto.isCustom === true || dto.ingredientId == null;
+
   return {
     id: String(dto.id),
     category: canonical,
-    name: dto.name,
-    nickname: dto.customName ?? "",
+    name: isCustomRow ? customName : dto.name,
+    nickname: customName,
     storageType: mapStorageTypeFromApi(dto.storageType),
     quantity: quantityDisplay,
     purchaseDate: toShortPurchaseDate(dto.purchaseDate),
     expirationDate: parseExpiryDate(dto.expiryDate),
     daysLeft: dto.daysLeft,
+    ingredientId: dto.ingredientId ?? null,
+    isCustom: dto.isCustom ?? false,
   };
 }
 
 /**
- * Build a create request from a draft. The draft must carry `ingredientId`
- * (set when the user picks from the master ingredient list). We throw early
- * here rather than letting the server reject with a confusing 404.
+ * Build a create request from a draft. Two shapes:
+ *   - Master item: `ingredientId` set, `customName` carries the optional
+ *     nickname (the user's pet name on top of the master display name).
+ *   - Custom item ("내 재료"): `ingredientId` is null, `customName` is the
+ *     user-typed display name (lives in `draft.name` on the draft side).
+ * We branch on `isCustom || ingredientId == null` so either signal flips the
+ * payload — the picker's "직접 추가" path and the toggle ON path both work.
  */
 export function mapIngredientToCreateRequest(
   draft: IngredientDraft,
 ): UserIngredientCreateRequest {
-  if (draft.ingredientId == null) {
-    throw new Error(
-      `IngredientDraft "${draft.name}" is missing ingredientId — pick a master ingredient before submitting`,
-    );
-  }
   if (draft.storage == null) {
     throw new Error(
       `IngredientDraft "${draft.name}" is missing storage — pick a storage type before submitting`,
     );
   }
 
+  const isCustomItem = draft.isCustom === true || draft.ingredientId == null;
+  if (isCustomItem && draft.name.trim() === "") {
+    throw new Error(
+      `Custom IngredientDraft is missing a name — type one before submitting`,
+    );
+  }
+
   const req: UserIngredientCreateRequest = {
-    ingredientId: draft.ingredientId,
+    ingredientId: isCustomItem ? null : (draft.ingredientId as number),
     storageType: mapStorageTypeToApi(draft.storage),
     // Drafts don't track purchase date; default to today.
     purchaseDate: toIsoDate(new Date()),
@@ -198,7 +244,13 @@ export function mapIngredientToCreateRequest(
   if (draft.expirationDate) req.expiryDate = toIsoDate(draft.expirationDate);
   if (draft.quantity != null) req.quantity = draft.quantity;
   if (draft.unit) req.unit = draft.unit;
-  if (draft.nickname) req.customName = draft.nickname;
+
+  if (isCustomItem) {
+    // Required: server uses customName as the display name for the row.
+    req.customName = draft.name.trim();
+  } else if (draft.nickname) {
+    req.customName = draft.nickname;
+  }
 
   return req;
 }
@@ -276,4 +328,25 @@ export async function updateIngredient(
 /** DELETE /api/v1/user-ingredients/{id} — 204 success. */
 export async function deleteIngredient(id: number): Promise<void> {
   await api.delete(`${BASE}/${id}`);
+}
+
+/**
+ * 보유 식재료 중 특정 레시피의 재료와 매칭되는 항목 (서버측 계산).
+ * GET /api/v1/user-ingredients/by-recipe/{recipeId} — 204 → 빈 배열.
+ *
+ * 응답 shape는 추후 확장될 수 있으므로 호출처가 의존하는 `name`만 명시.
+ * 다른 필드는 unknown으로 흘려보냄 (필요 시 확장).
+ */
+export interface OwnedRecipeIngredientDto {
+  name: string;
+}
+
+export async function getOwnedIngredientsByRecipe(
+  recipeId: number,
+): Promise<OwnedRecipeIngredientDto[]> {
+  const res = await api.get<OwnedRecipeIngredientDto[]>(
+    `${BASE}/by-recipe/${recipeId}`,
+  );
+  if (res.status === 204 || !res.data) return [];
+  return res.data;
 }
