@@ -166,6 +166,8 @@ export default function CookingStepScreen() {
   const [exitModalVisible, setExitModalVisible] = useState(false);
   const timer = useTimer();
 
+  // RecipeDetail.steps was reshaped to a flat string[] — `currentStep`
+  // is now the instruction text itself, no `.instruction` accessor needed.
   const currentStep = recipe.steps[stepIndex];
   const totalSteps = recipe.steps.length;
   const isFirst = stepIndex === 0;
@@ -173,8 +175,8 @@ export default function CookingStepScreen() {
 
   // Does current step's instruction contain any time patterns?
   const hasTimer = useMemo(
-    () => TIME_REGEX.test(currentStep.instruction),
-    [currentStep.instruction],
+    () => TIME_REGEX.test(currentStep),
+    [currentStep],
   );
 
   // Reset timer when step changes or when step has no timer
@@ -238,7 +240,7 @@ export default function CookingStepScreen() {
         {/* Instruction Glass Card */}
         <View style={styles.glassCard}>
           <RichInstruction
-            text={currentStep.instruction}
+            text={currentStep}
             hasTimer={hasTimer}
             onTimeTap={handleTimeTap}
           />

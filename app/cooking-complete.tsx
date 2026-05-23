@@ -41,7 +41,7 @@ export default function CookingCompleteScreen() {
   );
 
   // Only show owned ingredients (user actually had them)
-  const ingredients = recipe.ingredients.filter((i) => i.owned);
+  const ingredients = recipe.ingredients.filter((i) => i.isOwned !== false);
 
   const [selected, setSelected] = useState<Set<string>>(() => new Set());
   const [showConfetti, setShowConfetti] = useState(false);

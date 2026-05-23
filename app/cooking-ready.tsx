@@ -45,8 +45,8 @@ export default function CookingReadyScreen() {
   const [portions, setPortions] = useState(1);
   const [exitModalVisible, setExitModalVisible] = useState(false);
 
-  const owned = recipe.ingredients.filter((i) => i.owned);
-  const missing = recipe.ingredients.filter((i) => !i.owned);
+  const owned = recipe.ingredients.filter((i) => i.isOwned !== false);
+  const missing = recipe.ingredients.filter((i) => i.isOwned === false);
 
   return (
     <View style={[styles.screen, { paddingTop: insets.top }]}>
@@ -101,47 +101,39 @@ export default function CookingReadyScreen() {
             </Pressable>
           </View>
 
-          {/* Owned ingredients — checklist style */}
-          {owned.map((item) => {
-            const scaled = item.amount * portions;
-            return (
-              <View key={item.name} style={styles.checkRow}>
-                <Ionicons
-                  name="checkmark-circle"
-                  size={20}
-                  color={Colors.primaryContainer}
-                />
-                <Text style={styles.checkName}>{item.name}</Text>
-                <Text style={styles.checkQty}>
-                  {formatAmount(scaled)}
-                  {item.unit}
-                </Text>
-              </View>
-            );
-          })}
+          {/* Owned ingredients — checklist style. The portion stepper still
+              renders so the user can preview servings, but the amount text
+              now shows the backend's display string verbatim (e.g. "200g")
+              because amounts come as strings. Re-introducing portion
+              scaling will move with the cooking-* rewrite that drops mocks. */}
+          {owned.map((item) => (
+            <View key={item.name} style={styles.checkRow}>
+              <Ionicons
+                name="checkmark-circle"
+                size={20}
+                color={Colors.primaryContainer}
+              />
+              <Text style={styles.checkName}>{item.name}</Text>
+              <Text style={styles.checkQty}>{item.amount}</Text>
+            </View>
+          ))}
 
           {/* Missing ingredients — dimmed, no actions */}
           {missing.length > 0 && (
             <>
               <View style={styles.divider} />
               <Text style={styles.missingLabel}>없이 진행하는 재료</Text>
-              {missing.map((item) => {
-                const scaled = item.amount * portions;
-                return (
-                  <View key={item.name} style={styles.checkRow}>
-                    <Ionicons
-                      name="close-circle-outline"
-                      size={20}
-                      color={Colors.outlineVariant}
-                    />
-                    <Text style={styles.missingName}>{item.name}</Text>
-                    <Text style={styles.missingQty}>
-                      {formatAmount(scaled)}
-                      {item.unit}
-                    </Text>
-                  </View>
-                );
-              })}
+              {missing.map((item) => (
+                <View key={item.name} style={styles.checkRow}>
+                  <Ionicons
+                    name="close-circle-outline"
+                    size={20}
+                    color={Colors.outlineVariant}
+                  />
+                  <Text style={styles.missingName}>{item.name}</Text>
+                  <Text style={styles.missingQty}>{item.amount}</Text>
+                </View>
+              ))}
             </>
           )}
         </View>

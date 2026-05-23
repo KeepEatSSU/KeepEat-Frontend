@@ -153,24 +153,25 @@ export const MOCK_RECIPE_DETAILS: RecipeDetail[] = [
   {
     id: "1",
     title: "삼겹살 듬뿍 김치볶음밥",
-    matchCount: 4,
-    totalCount: 5,
     difficulty: "쉬움",
     time: "15분",
     kcal: "650kcal",
     ingredients: [
-      { name: "삼겹살", amount: 150, unit: "g", owned: true },
-      { name: "김치", amount: 50, unit: "g", owned: true },
-      { name: "대파", amount: 30, unit: "g", owned: true },
-      { name: "밥", amount: 200, unit: "g", owned: true },
-      { name: "참기름", amount: 1, unit: "g", owned: false },
+      { name: "삼겹살", amount: "150g", isOwned: true },
+      { name: "김치", amount: "50g", isOwned: true },
+      { name: "대파", amount: "30g", isOwned: true },
+      { name: "밥", amount: "200g", isOwned: true },
+      { name: "참기름", amount: "1g", isOwned: false },
     ],
+    // Steps as a flat string array — timer hints (e.g. "3분") are extracted
+    // from the text via regex in cooking-step.tsx; no separate timerSeconds
+    // field needed.
     steps: [
-      { order: 1, instruction: "대파는 송송 썰고, 김치와 삼겹살은 먹기 좋은 크기로 잘게 잘라 준비합니다." },
-      { order: 2, instruction: "팬을 중불로 달군 후, 삼겹살을 넣고 노릇노릇해질 때까지 3분 볶아줍니다.", timerSeconds: 180 },
-      { order: 3, instruction: "삼겹살 기름이 충분히 나오면 대파를 넣고 파기름을 냅니다." },
-      { order: 4, instruction: "파향이 올라오면 잘게 썬 김치를 넣고 2분 더 볶아줍니다.", timerSeconds: 120 },
-      { order: 5, instruction: "불을 약하게 줄이고 밥을 넣어 고루 섞은 뒤, 참기름을 한 바퀴 둘러 완성합니다." },
+      "대파는 송송 썰고, 김치와 삼겹살은 먹기 좋은 크기로 잘게 잘라 준비합니다.",
+      "팬을 중불로 달군 후, 삼겹살을 넣고 노릇노릇해질 때까지 3분 볶아줍니다.",
+      "삼겹살 기름이 충분히 나오면 대파를 넣고 파기름을 냅니다.",
+      "파향이 올라오면 잘게 썬 김치를 넣고 2분 더 볶아줍니다.",
+      "불을 약하게 줄이고 밥을 넣어 고루 섞은 뒤, 참기름을 한 바퀴 둘러 완성합니다.",
     ],
   },
 ];
