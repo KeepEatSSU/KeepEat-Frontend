@@ -4,7 +4,7 @@
  * we never grep for hardcoded URLs again.
  */
 
-export const API_BASE_URL = "http://43.202.180.175:8080";
+export const API_BASE_URL = "http://43.202.180.175.nip.io:8080";
 
 // Auth endpoints — used by the API client and token-refresh flow.
 export const AUTH_ENDPOINTS = {

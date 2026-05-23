@@ -1,65 +1,72 @@
-import { useState, useRef } from "react";
+import { useRef, useState } from "react";
 import {
-  View,
-  Text,
-  TextInput,
-  Pressable,
+  ActivityIndicator,
+  Keyboard,
   KeyboardAvoidingView,
   Platform,
-  Keyboard,
-  TouchableWithoutFeedback,
+  Pressable,
   ScrollView,
-  ActivityIndicator,
   StyleSheet,
+  Text,
+  TextInput,
+  TouchableWithoutFeedback,
+  View,
 } from "react-native";
-import { useRouter } from "expo-router";
+import { useLocalSearchParams, useRouter } from "expo-router";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { Ionicons } from "@expo/vector-icons";
-import { isAxiosError } from "axios";
 import { useToast } from "@/components/Toast";
 import { useAuth } from "@/context/AuthContext";
+import { getErrorMessage } from "@/services/api";
 import {
   Colors,
-  Spacing,
   FontSize,
   FontWeight,
+  LetterSpacing,
   Radius,
   Shadows,
-  LetterSpacing,
+  Spacing,
 } from "@/constants/theme";
 
 // ─── Validation ───────────────────────────────────────────────────────────────
 
-const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 const PW_LENGTH_REGEX = /^.{8,15}$/;
 const PW_COMPLEXITY_REGEX =
   /^(?=.*[a-zA-Z])(?=.*\d)(?=.*[!@#$%^&*()_+\-=[\]{};':"\\|,.<>/?]).+$/;
 
 // ─── Screen ───────────────────────────────────────────────────────────────────
+// Step 2 of signup: nickname + password, with the verified email coming in as
+// a route param. Lives in its own route specifically to mirror the proven
+// shape of login.tsx / change-password.tsx — a single, non-branching form.
+// Wrapping the password TextInput in a ternary + Fragment (as in the prior
+// step-state version of signup.tsx) reliably broke iOS native input session
+// binding; the per-route split is what fixes it.
 
-export default function SignupScreen() {
+export default function SignupProfileScreen() {
   const router = useRouter();
   const insets = useSafeAreaInsets();
   const { showToast } = useToast();
   const { signUp } = useAuth();
 
-  const emailRef = useRef<TextInput>(null);
+  const params = useLocalSearchParams<{ email?: string }>();
+  const email = typeof params.email === "string" ? params.email : "";
+
+  // login.tsx pattern: one ref for next-field focus chaining. Same prop
+  // surface (returnKeyType + onSubmitEditing). DO NOT replicate the broken
+  // signup.tsx step-2 setup (blurOnSubmit={false}, step branching, etc).
   const passwordRef = useRef<TextInput>(null);
 
   const [nickname, setNickname] = useState("");
-  const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [showPassword, setShowPassword] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [submitError, setSubmitError] = useState("");
 
-  // Validation
-  const isEmailValid = EMAIL_REGEX.test(email);
   const isPwLengthOk = PW_LENGTH_REGEX.test(password);
   const isPwComplexOk = PW_COMPLEXITY_REGEX.test(password);
   const isNicknameValid = nickname.trim().length > 0;
   const canSubmit =
-    isNicknameValid && isEmailValid && isPwLengthOk && isPwComplexOk && !submitting;
+    isNicknameValid && isPwLengthOk && isPwComplexOk && !submitting;
 
   const handleSignup = async () => {
     if (!canSubmit) return;
@@ -67,17 +74,18 @@ export default function SignupScreen() {
     setSubmitError("");
     setSubmitting(true);
     try {
-      await signUp(email.trim(), password);
+      await signUp(email, password, nickname.trim());
       showToast("회원가입이 완료되었습니다!");
       router.replace("/(tabs)");
     } catch (e) {
-      if (isAxiosError(e) && e.response?.status === 409) {
-        setSubmitError("이미 가입된 이메일이에요");
-      } else if (isAxiosError(e) && e.response?.status === 400) {
-        setSubmitError("입력하신 정보를 다시 확인해 주세요");
-      } else {
-        setSubmitError("가입 중 문제가 발생했어요. 잠시 후 다시 시도해 주세요");
-      }
+      // Prefer the backend's localized message ("이미 사용 중인 이메일입니다"
+      // etc.). Only the `message` field is forwarded — never the full body.
+      setSubmitError(
+        getErrorMessage(
+          e,
+          "가입 중 문제가 발생했어요. 잠시 후 다시 시도해주세요",
+        ),
+      );
     } finally {
       setSubmitting(false);
     }
@@ -117,6 +125,27 @@ export default function SignupScreen() {
 
           {/* Form */}
           <View style={styles.formCard}>
+            {/* Email (readonly — handed in from step 1 as a route param) */}
+            <View style={styles.inputWrap}>
+              <Text style={styles.inputLabel}>이메일</Text>
+              <View style={[styles.inputRow, styles.inputRowReadonly]}>
+                <Ionicons
+                  name="mail-outline"
+                  size={18}
+                  color={Colors.outline}
+                  style={{ marginRight: Spacing.sm }}
+                />
+                <Text style={styles.readonlyText} numberOfLines={1}>
+                  {email}
+                </Text>
+                <Ionicons
+                  name="checkmark-circle"
+                  size={18}
+                  color={Colors.primary}
+                />
+              </View>
+            </View>
+
             {/* Nickname */}
             <View style={styles.inputWrap}>
               <Text style={styles.inputLabel}>닉네임</Text>
@@ -134,55 +163,12 @@ export default function SignupScreen() {
                   placeholderTextColor={Colors.outline}
                   style={styles.input}
                   returnKeyType="next"
-                  onSubmitEditing={() => emailRef.current?.focus()}
-                />
-              </View>
-            </View>
-
-            {/* Email */}
-            <View style={styles.inputWrap}>
-              <Text style={styles.inputLabel}>이메일</Text>
-              <View
-                style={[
-                  styles.inputRow,
-                  email.length > 0 &&
-                    !isEmailValid &&
-                    styles.inputRowError,
-                ]}
-              >
-                <Ionicons
-                  name="mail-outline"
-                  size={18}
-                  color={Colors.outline}
-                  style={{ marginRight: Spacing.sm }}
-                />
-                <TextInput
-                  ref={emailRef}
-                  value={email}
-                  onChangeText={setEmail}
-                  placeholder="example@email.com"
-                  placeholderTextColor={Colors.outline}
-                  style={styles.input}
-                  keyboardType="email-address"
-                  autoCapitalize="none"
-                  autoCorrect={false}
-                  returnKeyType="next"
                   onSubmitEditing={() => passwordRef.current?.focus()}
                 />
-                {email.length > 0 && isEmailValid && (
-                  <Ionicons
-                    name="checkmark-circle"
-                    size={18}
-                    color={Colors.primary}
-                  />
-                )}
               </View>
-              {email.length > 0 && !isEmailValid && (
-                <Text style={styles.fieldError}>올바른 이메일 형식을 입력하세요</Text>
-              )}
             </View>
 
-            {/* Password */}
+            {/* Password — login.tsx prop set verbatim. No extra props. */}
             <View style={styles.inputWrap}>
               <Text style={styles.inputLabel}>비밀번호</Text>
               <View style={styles.inputRow}>
@@ -268,7 +254,10 @@ export default function SignupScreen() {
                 styles.primaryBtn,
                 !canSubmit && styles.primaryBtnDisabled,
                 canSubmit &&
-                  pressed && { opacity: 0.85, transform: [{ scale: 0.98 }] },
+                  pressed && {
+                    opacity: 0.85,
+                    transform: [{ scale: 0.98 }],
+                  },
               ]}
             >
               {submitting ? (
@@ -285,19 +274,13 @@ export default function SignupScreen() {
               )}
             </Pressable>
           </View>
-
-          {/* Footer */}
-          <View style={styles.footer}>
-            <Text style={styles.footerText}>이미 계정이 있으신가요?</Text>
-            <Pressable onPress={() => router.back()}>
-              <Text style={styles.footerLink}>로그인</Text>
-            </Pressable>
-          </View>
         </ScrollView>
       </KeyboardAvoidingView>
     </TouchableWithoutFeedback>
   );
 }
+
+// ─── Styles (login.tsx / change-password.tsx pattern) ────────────────────────
 
 const styles = StyleSheet.create({
   screen: {
@@ -356,6 +339,7 @@ const styles = StyleSheet.create({
     textTransform: "uppercase",
     letterSpacing: LetterSpacing.wide,
   },
+  // login.tsx pattern: paddingVertical (NOT height fix).
   inputRow: {
     flexDirection: "row",
     alignItems: "center",
@@ -364,8 +348,8 @@ const styles = StyleSheet.create({
     paddingHorizontal: Spacing.base,
     paddingVertical: Spacing.md,
   },
-  inputRowError: {
-    backgroundColor: "rgba(186, 26, 26, 0.05)",
+  inputRowReadonly: {
+    backgroundColor: Colors.surfaceContainerHigh,
   },
   input: {
     flex: 1,
@@ -375,21 +359,11 @@ const styles = StyleSheet.create({
     padding: 0,
     margin: 0,
   },
-  fieldError: {
-    fontSize: FontSize.labelSm,
+  readonlyText: {
+    flex: 1,
+    fontSize: FontSize.bodyLg,
     fontWeight: FontWeight.medium,
-    color: Colors.error,
-    marginTop: -2,
-  },
-  submitErrorRow: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: Spacing.xs,
-  },
-  submitErrorText: {
-    fontSize: FontSize.bodySm,
-    fontWeight: FontWeight.medium,
-    color: Colors.error,
+    color: Colors.onSurfaceVariant,
   },
 
   // Checklist
@@ -412,6 +386,18 @@ const styles = StyleSheet.create({
     fontWeight: FontWeight.semiBold,
   },
 
+  // Submit error
+  submitErrorRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: Spacing.xs,
+  },
+  submitErrorText: {
+    fontSize: FontSize.bodySm,
+    fontWeight: FontWeight.medium,
+    color: Colors.error,
+  },
+
   // Primary button
   primaryBtn: {
     backgroundColor: Colors.primary,
@@ -432,24 +418,5 @@ const styles = StyleSheet.create({
   },
   primaryBtnTextDisabled: {
     color: Colors.outline,
-  },
-
-  // Footer
-  footer: {
-    flexDirection: "row",
-    justifyContent: "center",
-    alignItems: "center",
-    gap: Spacing.sm,
-    marginTop: Spacing.xxl,
-  },
-  footerText: {
-    fontSize: FontSize.bodySm,
-    fontWeight: FontWeight.medium,
-    color: Colors.outline,
-  },
-  footerLink: {
-    fontSize: FontSize.bodySm,
-    fontWeight: FontWeight.bold,
-    color: Colors.primary,
   },
 });

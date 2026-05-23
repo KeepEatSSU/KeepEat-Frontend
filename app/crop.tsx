@@ -9,7 +9,6 @@ import {
 } from "react-native";
 import { useRouter, useLocalSearchParams } from "expo-router";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
-import { LinearGradient } from "expo-linear-gradient";
 import { Ionicons } from "@expo/vector-icons";
 import Animated, {
   useSharedValue,
@@ -26,7 +25,6 @@ import {
   FontWeight,
   Radius,
   Shadows,
-  PrimaryGradient,
   LetterSpacing,
 } from "@/constants/theme";
 import { OCR_LOADING_TIPS } from "@/mocks";
@@ -385,19 +383,20 @@ export default function CropScreen() {
           onPress={startProcessing}
           disabled={isProcessing}
           style={({ pressed }) => [
-            styles.ocrPressable,
+            styles.ocrButton,
+            isProcessing ? styles.ocrButtonDisabled : styles.ocrButtonActive,
             !isProcessing &&
               pressed && { opacity: 0.85, transform: [{ scale: 0.98 }] },
           ]}
         >
-          <LinearGradient
-            colors={[...PrimaryGradient.colors]}
-            start={PrimaryGradient.start}
-            end={PrimaryGradient.end}
-            style={[styles.ocrButton, isProcessing && { opacity: 0.5 }]}
+          <Text
+            style={[
+              styles.ocrButtonText,
+              isProcessing && styles.ocrButtonTextDisabled,
+            ]}
           >
-            <Text style={styles.ocrButtonText}>OCR 하기</Text>
-          </LinearGradient>
+            OCR 하기
+          </Text>
         </Pressable>
       </View>
 
@@ -533,21 +532,29 @@ const styles = StyleSheet.create({
     paddingHorizontal: Spacing.xl,
     paddingTop: Spacing.base,
   },
-  ocrPressable: {
-    borderRadius: Radius.xl,
-    overflow: "hidden",
-  },
+  // Matches detail.tsx "수정 완료" (saveBtn) so all primary CTAs share the
+  // same flat single-color shape, no gradient/glow.
   ocrButton: {
-    paddingVertical: Spacing.lg,
+    height: 56,
     borderRadius: Radius.xl,
     alignItems: "center",
     justifyContent: "center",
-    ...Shadows.ambient,
+  },
+  ocrButtonActive: {
+    backgroundColor: Colors.primary,
+    ...Shadows.fab,
+  },
+  ocrButtonDisabled: {
+    backgroundColor: Colors.surfaceContainerHigh,
   },
   ocrButtonText: {
-    fontSize: FontSize.titleLg,
+    fontSize: FontSize.bodyLg,
     fontWeight: FontWeight.bold,
     color: Colors.onPrimary,
+    letterSpacing: LetterSpacing.tight,
+  },
+  ocrButtonTextDisabled: {
+    color: Colors.outline,
   },
   overlayProcessing: {
     ...StyleSheet.absoluteFillObject,
