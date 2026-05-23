@@ -23,6 +23,11 @@ const TAB_CONFIG = {
     activeIcon: "cube" as const,
     label: "냉장고",
   },
+  explore: {
+    icon: "book-outline" as const,
+    activeIcon: "book" as const,
+    label: "레시피",
+  },
   recipe: {
     icon: "receipt-outline" as const,
     activeIcon: "receipt" as const,
@@ -129,6 +134,7 @@ export default function TabLayout() {
         screenOptions={{ headerShown: false }}
       >
         <Tabs.Screen name="index" />
+        <Tabs.Screen name="explore" />
         <Tabs.Screen name="add" />
         <Tabs.Screen name="recipe" />
       </Tabs>
