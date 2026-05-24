@@ -15,6 +15,7 @@
  *   home). targetId hooks in A-2 once the backend supplies it.
  */
 
+import { useCallback, useEffect, useState } from "react";
 import { ActivityIndicator, FlatList, Modal, Pressable, StyleSheet, Text, View } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 import { useRouter } from "expo-router";
@@ -32,6 +33,7 @@ import type {
   NotificationType,
 } from "@/constants/domain";
 import { formatRelativeTime } from "@/utils/dateUtils";
+import { routeForNotificationType } from "@/utils/notificationRouting";
 
 // Per-type icon + accent color. Kept inline (not a separate config file)
 // because the popup is the only consumer.
@@ -49,23 +51,12 @@ const TYPE_VISUAL: Record<
     color: Colors.error,
     bg: "rgba(186, 26, 26, 0.10)",
   },
-  weekly_cheer: {
-    icon: "trophy-outline",
-    color: "#C97A1A",
-    bg: "rgba(249, 168, 37, 0.12)",
-  },
   recipe_ready: {
     icon: "restaurant-outline",
     color: Colors.primaryContainer,
     bg: "rgba(46, 204, 113, 0.12)",
   },
 };
-
-// Route by type. NOTICE/RECIPE_READY → /recipe (recipe tab is where they
-// get marked-as-read on focus); EXPIRY_SOON/WEEKLY_CHEER → / (home tab).
-function routeForType(type: NotificationType): "/" | "/recipe" {
-  return type === "recipe_ready" || type === "notice" ? "/recipe" : "/";
-}
 
 interface Props {
   visible: boolean;
@@ -93,12 +84,44 @@ export function NotificationPopup({
   const router = useRouter();
   const insets = useSafeAreaInsets();
 
+  // 본문 펼침 상태 — 목적지 없는 타입(NOTICE)이 카드 탭으로 본문을 펼치고 다시
+  // 접을 수 있게 한다. 팝업이 닫힐 때 리셋해서 다음 오픈은 항상 collapsed 상태로.
+  const [expandedIds, setExpandedIds] = useState<Set<number>>(() => new Set());
+
+  const toggleExpand = useCallback((id: number) => {
+    setExpandedIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  }, []);
+
+  useEffect(() => {
+    if (!visible) setExpandedIds(new Set());
+  }, [visible]);
+
   const handleCardPress = (n: AppNotification) => {
-    // Read state is now driven by the destination screen via markTypeRead
-    // in useFocusEffect — tapping the card just navigates. (onNotificationRead
-    // prop is retained on the interface for future direct-read use cases.)
+    // Read state is driven by the destination screen via markTypeRead in
+    // useFocusEffect (for EXPIRY_SOON/RECIPE_READY) or by popup onClose
+    // (for NOTICE, which has no destination).
+
+    // RECIPE_READY는 isRead로 분기. 이미 읽음 처리된 카드는 "과거 추천"
+    // 알림이라 현재 recommendedRecipes와 무관할 가능성이 큼 — swipe 화면을
+    // 열어도 사용자가 기대한 결과가 아니다. 그래서 클릭에 반응하지 않는다.
+    // (원격 푸시 탭은 사실상 항상 안 읽음 상태라 NotificationContext 쪽은
+    // 별도 분기 없이 그대로 이동.)
+    if (n.type === "recipe_ready" && n.isRead) return;
+
+    const path = routeForNotificationType(n.type);
+    if (!path) {
+      // NOTICE 등 목적지 없는 타입: 본문을 펼치거나 접고, 팝업은 유지.
+      // 사용자는 다른 카드를 계속 탐색할 수 있고, 긴 공지도 그 자리에서 읽는다.
+      toggleExpand(n.id);
+      return;
+    }
     onClose();
-    router.push(routeForType(n.type) as never);
+    router.push(path as never);
   };
 
   const renderFooter = () => {
@@ -176,6 +199,7 @@ export function NotificationPopup({
           renderItem={({ item }) => (
             <NotificationCard
               item={item}
+              expanded={expandedIds.has(item.id)}
               onPress={() => handleCardPress(item)}
             />
           )}
@@ -209,9 +233,16 @@ export function NotificationPopup({
 
 function NotificationCard({
   item,
+  expanded,
   onPress,
 }: {
   item: AppNotification;
+  /**
+   * 본문을 다 보여줄지 여부. 목적지 없는 타입(NOTICE)이 카드 탭으로 토글한다.
+   * 목적지 있는 타입은 어차피 탭 시 화면을 이동하므로 항상 false로 들어와도
+   * 무방.
+   */
+  expanded: boolean;
   onPress: () => void;
 }) {
   const visual = TYPE_VISUAL[item.type];
@@ -235,7 +266,10 @@ function NotificationCard({
         <Text style={styles.cardTitle} numberOfLines={1}>
           {item.title}
         </Text>
-        <Text style={styles.cardSubtitle} numberOfLines={2}>
+        <Text
+          style={styles.cardSubtitle}
+          numberOfLines={expanded ? undefined : 2}
+        >
           {item.body}
         </Text>
       </View>

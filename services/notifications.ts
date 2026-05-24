@@ -35,9 +35,23 @@ export interface NotificationPage {
 const TYPE_MAP: Record<string, NotificationType> = {
   NOTICE: "notice",
   EXPIRY_SOON: "expiry_soon",
-  WEEKLY_CHEER: "weekly_cheer",
   RECIPE_READY: "recipe_ready",
 };
+
+/** Backend's UPPER-case notification type enum. Mirrors the keys of TYPE_MAP. */
+export type BackendNotificationType =
+  | "NOTICE"
+  | "EXPIRY_SOON"
+  | "RECIPE_READY";
+
+/** Domain (lowercase) → backend (UPPER). The three types are pure
+ *  toUpperCase, but routing through this helper keeps the type narrowing
+ *  in one place and surfaces a compile error if the union ever drifts. */
+export function backendNotificationType(
+  type: NotificationType,
+): BackendNotificationType {
+  return type.toUpperCase() as BackendNotificationType;
+}
 
 interface RawNotification {
   id: number;
@@ -103,6 +117,31 @@ export async function markNotificationRead(id: number): Promise<void> {
 
 export async function markAllNotificationsRead(): Promise<void> {
   await api.patch("/api/notifications/read-all");
+}
+
+/**
+ * 타입별 일괄 읽음 — PATCH /api/notifications/read-all/{TYPE}.
+ * `type`은 백엔드 enum(UPPER). domain의 lowercase에서 변환 시
+ * `backendNotificationType()` 헬퍼를 거치면 type-safe.
+ */
+export async function markTypeNotificationsRead(
+  type: BackendNotificationType,
+): Promise<void> {
+  await api.patch(`/api/notifications/read-all/${type}`);
+}
+
+// ─── Push token (POST/DELETE /api/notifications/token) ───────────────────────
+// Expo push token을 서버에 등록/삭제. AuthContext의 login/logout 흐름이
+// `services/pushNotifications.ts`의 convenience wrapper 경유로 호출.
+
+export async function registerPushToken(token: string): Promise<void> {
+  await api.post("/api/notifications/token", { token });
+}
+
+export async function deletePushToken(token: string): Promise<void> {
+  // axios DELETE는 body를 `data`로 실어보낸다. 백엔드 스펙은
+  // `{ token }` body 방식이라 query param이 아님에 주의.
+  await api.delete("/api/notifications/token", { data: { token } });
 }
 
 // ─── Unread count (future) ───────────────────────────────────────────────────

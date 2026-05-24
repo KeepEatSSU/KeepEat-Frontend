@@ -42,6 +42,7 @@ import {
   mapIngredientToUpdateRequest,
   type IngredientUpdate,
 } from "@/services/userIngredients";
+import { getErrorMessage } from "@/services/api";
 import { getMasterSnapshot } from "@/services/ingredientMaster";
 import { mapStorageTypeFromApi } from "@/services/userIngredients";
 import { CapacityInput } from "@/components/CapacityInput";
@@ -160,6 +161,7 @@ export default function DetailScreen() {
   // ── Async resolution from server ──
   const [init, setInit] = useState<DetailInit | null>(null);
   const [loadError, setLoadError] = useState(false);
+  const [loadErrorObj, setLoadErrorObj] = useState<unknown>(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -172,8 +174,11 @@ export default function DetailScreen() {
           return;
         }
         if (!cancelled) setInit(deriveInit(found));
-      } catch {
-        if (!cancelled) setLoadError(true);
+      } catch (e) {
+        if (!cancelled) {
+          setLoadError(true);
+          setLoadErrorObj(e);
+        }
       }
     })();
     return () => {
@@ -184,7 +189,7 @@ export default function DetailScreen() {
   if (loadError) {
     return (
       <ErrorScreen
-        message="식재료 정보를 불러오지 못했어요"
+        message={getErrorMessage(loadErrorObj, "식재료 정보를 불러오지 못했어요")}
         subMessage="잠시 후 다시 시도해 주세요"
       />
     );
@@ -328,8 +333,8 @@ function DetailEditor({
         showToast("변경된 정보가 저장됐어요");
       }
       router.back();
-    } catch {
-      showToast("저장 중 문제가 생겼어요. 잠시 후 다시 시도해주세요");
+    } catch (e) {
+      showToast(getErrorMessage(e, "저장 중 문제가 생겼어요. 잠시 후 다시 시도해주세요"));
     } finally {
       setSubmitting(false);
     }
@@ -348,8 +353,8 @@ function DetailEditor({
       await deleteIngredient(Number(id));
       showToast("삭제되었어요");
       router.back();
-    } catch {
-      showToast("삭제하지 못했어요. 잠시 후 다시 시도해 주세요");
+    } catch (e) {
+      showToast(getErrorMessage(e, "삭제하지 못했어요. 잠시 후 다시 시도해 주세요"));
     } finally {
       setSubmitting(false);
     }

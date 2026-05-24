@@ -140,7 +140,6 @@ export interface ManagementTip {
 export type NotificationType =
   | "notice"
   | "expiry_soon"
-  | "weekly_cheer"
   | "recipe_ready";
 
 export interface AppNotification {

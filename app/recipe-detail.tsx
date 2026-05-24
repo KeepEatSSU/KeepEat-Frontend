@@ -36,6 +36,7 @@ import {
   type RecipeIngredientDto,
 } from "@/services/recipes";
 import { getErrorMessage } from "@/services/api";
+import { formatAmount } from "@/utils/recipeServings";
 import {
   createIngredients,
   getOwnedIngredientsByRecipe,
@@ -59,24 +60,9 @@ export interface MappedRecipeDetail
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
-function parseAmount(amountStr: string): { num: number; unit: string } {
-  const match = amountStr.match(/^([\d.]+)(.*)$/);
-  if (match) {
-    return { num: parseFloat(match[1]), unit: match[2].trim() };
-  }
-  return { num: 1, unit: amountStr }; // Fallback
-}
-
-function formatAmount(amountStr: string, portions: number): string {
-  if (portions === 1) return amountStr;
-
-  const parsed = parseAmount(amountStr);
-  if (isNaN(parsed.num)) return amountStr; // If it's just "적당량", return as is
-
-  const scaled = parsed.num * portions;
-  const scaledStr = scaled % 1 === 0 ? String(scaled) : scaled.toFixed(1);
-  return `${scaledStr}${parsed.unit}`;
-}
+// parseAmount / formatAmount는 utils/recipeServings.ts로 옮겨 cooking-ready와
+// 공유. recipe-detail 단독으로 쓰던 시절의 인라인 정의에서 옮긴 것일 뿐
+// 동작은 동일.
 
 // Reaction toggle semantics (same as explore.tsx's card-level helper):
 //   current === type → clear  (count-1)
@@ -304,6 +290,7 @@ export default function RecipeDetailScreen() {
   const [recipe, setRecipe] = useState<MappedRecipeDetail | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [isError, setIsError] = useState(false);
+  const [loadError, setLoadError] = useState<unknown>(null);
 
   useEffect(() => {
     const fetchRecipeDetail = async () => {
@@ -342,8 +329,10 @@ export default function RecipeDetailScreen() {
         };
         setRecipe(mappedRecipe);
       } catch (error) {
-        showToast("레시피 정보를 불러오지 못했어요.");
+        // toast는 폴백 카피, ErrorScreen에 동일 메시지를 헬퍼로 한 번 더 노출.
+        showToast(getErrorMessage(error, "레시피 정보를 불러오지 못했어요."));
         setIsError(true);
+        setLoadError(error);
       } finally {
         setIsLoading(false);
       }
@@ -498,7 +487,7 @@ export default function RecipeDetailScreen() {
   if (isError) {
     return (
       <ErrorScreen
-        message="레시피 정보를 불러오지 못했어요"
+        message={getErrorMessage(loadError, "레시피 정보를 불러오지 못했어요")}
         subMessage="일시적인 오류일 수 있으니 잠시 후 다시 시도해주세요."
         buttonLabel="이전으로 돌아가기"
         onPressHome={() => router.back()}
@@ -737,7 +726,12 @@ export default function RecipeDetailScreen() {
               onPress={() =>
                 router.push({
                   pathname: "/cooking-ready",
-                  params: { id: recipe.recipeId },
+                  // 현재 인분을 cooking-ready에 전달 — 그 화면이 같은 스케일링
+                  // 헬퍼로 재료를 다시 곱셈해 같은 표시값을 이어간다.
+                  params: {
+                    id: recipe.recipeId,
+                    servings: String(portions),
+                  },
                 } as never)
               }
               style={({ pressed }) => [

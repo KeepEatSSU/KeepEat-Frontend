@@ -8,7 +8,7 @@ import {
   Shadows,
   Spacing,
 } from "@/constants/theme";
-import { sendEmailCode, verifyEmailCode } from "@/services/api";
+import { getErrorMessage, sendEmailCode, verifyEmailCode } from "@/services/api";
 import { Ionicons } from "@expo/vector-icons";
 import { useRouter } from "expo-router";
 import { useState } from "react";
@@ -66,10 +66,12 @@ export default function SignupScreen() {
       setCodeSent(true);
       setVerifyCode("");
       showToast("인증번호를 전송했어요");
-    } catch {
-      // Logger already prints the server body / network code; user-facing
-      // message stays generic.
-      setVerifyError("인증번호 전송에 실패했어요. 잠시 후 다시 시도해주세요");
+    } catch (e) {
+      // 백엔드가 "이미 가입된 이메일" 같은 친화 메시지를 message 필드에 실어
+      // 보내므로 그대로 노출. 없으면 일반 폴백.
+      setVerifyError(
+        getErrorMessage(e, "인증번호 전송에 실패했어요. 잠시 후 다시 시도해주세요"),
+      );
     } finally {
       setSending(false);
     }
@@ -95,8 +97,8 @@ export default function SignupScreen() {
         params: { email: email.trim() },
       });
       setTimeout(() => showToast("이메일 인증이 완료되었어요"), 400);
-    } catch {
-      setVerifyError("인증번호가 일치하지 않아요");
+    } catch (e) {
+      setVerifyError(getErrorMessage(e, "인증번호가 일치하지 않아요"));
     } finally {
       setVerifying(false);
     }

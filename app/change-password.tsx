@@ -15,9 +15,8 @@ import {
 import { useRouter } from "expo-router";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { Ionicons } from "@expo/vector-icons";
-import { isAxiosError } from "axios";
 import { useToast } from "@/components/Toast";
-import { changePassword } from "@/services/api";
+import { changePassword, getErrorMessage } from "@/services/api";
 import {
   Colors,
   FontSize,
@@ -79,11 +78,9 @@ export default function ChangePasswordScreen() {
       showToast("비밀번호가 변경되었어요");
       router.back();
     } catch (e) {
-      if (isAxiosError(e) && e.response?.status === 400) {
-        showToast("현재 비밀번호가 일치하지 않아요");
-      } else {
-        showToast("비밀번호 변경에 실패했어요. 잠시 후 다시 시도해주세요");
-      }
+      // 백엔드가 400에 "현재 비밀번호가 일치하지 않습니다." 등 친화 message를
+      // 실어보내므로 getErrorMessage로 일원화. 그 외 status는 폴백 노출.
+      showToast(getErrorMessage(e, "비밀번호 변경에 실패했어요. 잠시 후 다시 시도해주세요"));
     } finally {
       setSubmitting(false);
     }

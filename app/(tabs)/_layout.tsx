@@ -159,7 +159,13 @@ export default function TabLayout() {
                 } as never);
               }
             } catch (e) {
+              // onCamera의 Alert와 일관되게 사용자에게 안내. 권한 거부나
+              // 시스템 오류 어느 쪽이든 사용자가 무반응을 의아해하지 않게.
               console.log("Gallery picker error:", e);
+              Alert.alert(
+                "알림",
+                "갤러리를 열 수 없어요. 권한 설정을 확인해 주세요.",
+              );
             }
           }, 400);
         }}

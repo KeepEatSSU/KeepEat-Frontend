@@ -100,8 +100,8 @@ export default function LoginScreen() {
       }
       await loginWithTokens(tokens.accessToken, tokens.refreshToken);
       router.replace("/(tabs)");
-    } catch {
-      showToast("구글 로그인에 실패했어요. 잠시 후 다시 시도해주세요");
+    } catch (e) {
+      showToast(getErrorMessage(e, "구글 로그인에 실패했어요. 잠시 후 다시 시도해주세요"));
     } finally {
       setGoogleSubmitting(false);
     }

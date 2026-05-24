@@ -22,6 +22,7 @@ import {
 import { ConfirmModal } from "@/components/ConfirmModal";
 import { ErrorScreen } from "@/components/ErrorScreen";
 import { getRecipeDetail, type RecipeDetailDto } from "@/services/recipes";
+import { getErrorMessage } from "@/services/api";
 
 // ─── Time Parsing ─────────────────────────────────────────────────────────────
 
@@ -163,6 +164,7 @@ export default function CookingStepScreen() {
   const [recipe, setRecipe] = useState<RecipeDetailDto | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [isError, setIsError] = useState(false);
+  const [loadError, setLoadError] = useState<unknown>(null);
 
   const [stepIndex, setStepIndex] = useState(0);
   const [exitModalVisible, setExitModalVisible] = useState(false);
@@ -179,8 +181,11 @@ export default function CookingStepScreen() {
       try {
         const detail = await getRecipeDetail(recipeId);
         if (!cancelled) setRecipe(detail);
-      } catch {
-        if (!cancelled) setIsError(true);
+      } catch (e) {
+        if (!cancelled) {
+          setIsError(true);
+          setLoadError(e);
+        }
       } finally {
         if (!cancelled) setIsLoading(false);
       }
@@ -237,7 +242,7 @@ export default function CookingStepScreen() {
   if (isError) {
     return (
       <ErrorScreen
-        message="레시피 정보를 불러오지 못했어요"
+        message={getErrorMessage(loadError, "레시피 정보를 불러오지 못했어요")}
         subMessage="잠시 후 다시 시도해 주세요"
         buttonLabel="이전으로 돌아가기"
         onPressHome={() => router.back()}

@@ -20,6 +20,7 @@ import {
   mapIngredientToCreateRequest,
   mapStorageTypeFromApi,
 } from "@/services/userIngredients";
+import { getErrorMessage } from "@/services/api";
 import { ocrPending, mapOcrCandidateToDraft } from "@/services/ocr";
 import { CommonActions } from "@react-navigation/native";
 import { useNavigation, useLocalSearchParams } from "expo-router";
@@ -164,8 +165,8 @@ export default function AddConfirmScreen() {
       await createIngredients(requests);
       showToast(`${items.length}개를 냉장고에 담았어요`);
       resetToHome();
-    } catch {
-      showToast("등록하지 못했어요. 잠시 후 다시 시도해 주세요");
+    } catch (e) {
+      showToast(getErrorMessage(e, "등록하지 못했어요. 잠시 후 다시 시도해 주세요"));
     } finally {
       setSubmitting(false);
     }

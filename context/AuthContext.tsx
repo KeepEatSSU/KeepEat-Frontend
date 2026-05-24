@@ -30,6 +30,10 @@ import {
   type UserInfo,
 } from "@/services/api";
 import { tokenStorage } from "@/services/tokenStorage";
+import {
+  clearPushTokenOnServer,
+  syncPushTokenWithServer,
+} from "@/services/pushNotifications";
 import { DEV_BYPASS_AUTH } from "@/constants/config";
 import { MOCK_JWT, MOCK_USER } from "@/mocks/devAuth";
 
@@ -91,7 +95,15 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
           return;
         }
         const me = await getMyInfo();
-        if (!cancelled) setUser(me);
+        if (!cancelled) {
+          setUser(me);
+          // Auto-login path (boot recovery via stored token) doesn't go
+          // through login()/loginWithTokens(), so push-token registration
+          // wouldn't fire here without this call. Fire-and-forget — the
+          // wrapper swallows its own errors so the boot flow can't be
+          // blocked by push-server hiccups.
+          syncPushTokenWithServer();
+        }
       } catch {
         await tokenStorage.clearTokens();
         if (!cancelled) setUser(null);
@@ -130,6 +142,9 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     await apiLogin(email, password);
     const me = await getMyInfo();
     setUser(me);
+    // Best-effort push-token registration. Fire-and-forget so it can't
+    // delay the login UI; failures are swallowed inside the wrapper.
+    syncPushTokenWithServer();
   }, []);
 
   const loginWithTokens = useCallback(
@@ -144,6 +159,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       await tokenStorage.setTokens(accessToken, refreshToken);
       const me = await getMyInfo();
       setUser(me);
+      syncPushTokenWithServer();
     },
     [],
   );
@@ -160,6 +176,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       await apiLogin(email, password);
       const me = await getMyInfo();
       setUser(me);
+      syncPushTokenWithServer();
     },
     [],
   );
@@ -174,6 +191,10 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       setUser(null);
       return;
     }
+    // Must run BEFORE apiLogout — the DELETE /api/notifications/token call
+    // needs the Bearer header that apiLogout's clearTokens() will remove.
+    // clearPushTokenOnServer swallows its own errors so it never blocks.
+    await clearPushTokenOnServer();
     await apiLogout();
     setUser(null);
   }, []);
@@ -184,6 +205,10 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       setUser(null);
       return;
     }
+    // Same ordering rule as logout — deregister the push token while the
+    // session is still authenticated. Backend may also cascade-clean on
+    // user deletion, but doing it explicitly avoids relying on that detail.
+    await clearPushTokenOnServer();
     // api.deleteAccount throws on failure (e.g. wrong password) without
     // touching tokens — we let the caller surface a toast. On success it
     // already cleared tokens + emitted the logout event; setUser(null)

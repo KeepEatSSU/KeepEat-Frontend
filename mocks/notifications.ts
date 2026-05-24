@@ -46,7 +46,7 @@ export const MOCK_NOTIFICATIONS: AppNotification[] = [
   },
   {
     id: 3,
-    type: "weekly_cheer",
+    type: "notice",
     title: "이번 주 최고예요! 🎉",
     body: "KeepEat과 함께 4번이나 식재료를 구출했어요!",
     isRead: false,
@@ -94,7 +94,7 @@ export const MOCK_NOTIFICATIONS: AppNotification[] = [
   },
   {
     id: 9,
-    type: "weekly_cheer",
+    type: "notice",
     title: "꾸준해요!",
     body: "이번 주에도 알차게 보내고 있어요.",
     isRead: true,
@@ -134,7 +134,7 @@ export const MOCK_NOTIFICATIONS: AppNotification[] = [
   },
   {
     id: 14,
-    type: "weekly_cheer",
+    type: "notice",
     title: "이번 주 절약왕!",
     body: "음식물 쓰레기를 줄이는 데 성공했어요.",
     isRead: true,
@@ -166,7 +166,7 @@ export const MOCK_NOTIFICATIONS: AppNotification[] = [
   },
   {
     id: 18,
-    type: "weekly_cheer",
+    type: "notice",
     title: "지난주 최고 기록!",
     body: "8개의 식재료를 구출했어요.",
     isRead: true,
@@ -198,7 +198,7 @@ export const MOCK_NOTIFICATIONS: AppNotification[] = [
   },
   {
     id: 22,
-    type: "weekly_cheer",
+    type: "notice",
     title: "꾸준한 사용 감사해요",
     body: "당신의 한 끼가 더 풍성해지길 바라요.",
     isRead: true,
@@ -230,7 +230,7 @@ export const MOCK_NOTIFICATIONS: AppNotification[] = [
   },
   {
     id: 26,
-    type: "weekly_cheer",
+    type: "notice",
     title: "이번 달 식재료 마스터!",
     body: "20개의 식재료를 알차게 사용했어요.",
     isRead: true,
@@ -262,7 +262,7 @@ export const MOCK_NOTIFICATIONS: AppNotification[] = [
   },
   {
     id: 30,
-    type: "weekly_cheer",
+    type: "notice",
     title: "한 달간 정말 잘했어요!",
     body: "KeepEat 한 달 사용 축하해요.",
     isRead: true,

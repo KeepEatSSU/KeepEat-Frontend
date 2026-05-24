@@ -37,27 +37,16 @@ import type {
 import { useAuth } from "@/context/AuthContext";
 import { useToast } from "@/components/Toast";
 import {
+  backendNotificationType,
   fetchNotificationsPage,
   markAllNotificationsRead,
   markNotificationRead,
+  markTypeNotificationsRead,
 } from "@/services/notifications";
-
-// Maps a raw backend push-payload type ("RECIPE_READY", etc.) to the in-app
-// route that should open. Kept in this file (not services/) because routing
-// is a screen-layer concern. Returns null for unknown types so we no-op
-// rather than navigating somewhere unexpected.
-function routeForApiType(apiType: string): "/" | "/recipe" | null {
-  switch (apiType) {
-    case "RECIPE_READY":
-    case "NOTICE":
-      return "/recipe";
-    case "EXPIRY_SOON":
-    case "WEEKLY_CHEER":
-      return "/";
-    default:
-      return null;
-  }
-}
+import {
+  routeForNotificationType,
+  toDomainNotificationType,
+} from "@/utils/notificationRouting";
 
 // ─── Context ──────────────────────────────────────────────────────────────────
 
@@ -177,26 +166,23 @@ export function NotificationProvider({
   }, []);
 
   const markTypeRead = useCallback(async (type: NotificationType) => {
-    // Collect ids inside the setState callback so we always see the latest
-    // items even if multiple focus effects fire in quick succession.
+    // Optimistic: flip the type's unread items to read in-memory, then
+    // issue a single PATCH /api/notifications/read-all/{TYPE}. Rolls back
+    // to the pre-flip snapshot on failure. No-op when nothing unread for
+    // that type — focus effects can fire freely without burning requests.
     let snapshot: AppNotification[] = [];
-    let unreadIds: number[] = [];
+    let hadUnread = false;
     setItems((prev) => {
-      unreadIds = prev
-        .filter((n) => !n.isRead && n.type === type)
-        .map((n) => n.id);
-      if (unreadIds.length === 0) return prev; // bail — no state change → no re-render
+      const unreadOfType = prev.filter((n) => !n.isRead && n.type === type);
+      if (unreadOfType.length === 0) return prev;
+      hadUnread = true;
       snapshot = prev;
-      const idSet = new Set(unreadIds);
+      const idSet = new Set(unreadOfType.map((n) => n.id));
       return prev.map((n) => (idSet.has(n.id) ? { ...n, isRead: true } : n));
     });
-    if (unreadIds.length === 0) return; // no PATCH calls either
+    if (!hadUnread) return;
     try {
-      // Method A: parallel per-id PATCH. If/when the backend adds a typed
-      // bulk-read endpoint (e.g. PATCH /api/notifications/read?type=...),
-      // swap this body for a single call — call sites (useFocusEffect)
-      // stay unchanged.
-      await Promise.all(unreadIds.map((id) => markNotificationRead(id)));
+      await markTypeNotificationsRead(backendNotificationType(type));
     } catch {
       setItems(snapshot);
     }
@@ -240,7 +226,9 @@ export function NotificationProvider({
       (response) => {
         const apiType = response.notification.request.content.data?.type;
         if (typeof apiType !== "string") return;
-        const path = routeForApiType(apiType);
+        const domainType = toDomainNotificationType(apiType);
+        if (!domainType) return;
+        const path = routeForNotificationType(domainType);
         if (path) router.push(path);
       },
     );
@@ -255,13 +243,19 @@ export function NotificationProvider({
     if (!isAuthenticated || coldStartedRef.current) return;
     coldStartedRef.current = true;
     let cancelled = false;
-    Notifications.getLastNotificationResponseAsync().then((response) => {
-      if (cancelled || !response) return;
-      const apiType = response.notification.request.content.data?.type;
-      if (typeof apiType !== "string") return;
-      const path = routeForApiType(apiType);
-      if (path) router.push(path);
-    });
+    Notifications.getLastNotificationResponseAsync()
+      .then((response) => {
+        if (cancelled || !response) return;
+        const apiType = response.notification.request.content.data?.type;
+        if (typeof apiType !== "string") return;
+        const domainType = toDomainNotificationType(apiType);
+        if (!domainType) return;
+        const path = routeForNotificationType(domainType);
+        if (path) router.push(path);
+      })
+      // 네이티브 API 실패 — unhandled rejection 방지용 silent catch.
+      // 콜드 스타트 라우팅이 실패할 뿐 사용자 플로우엔 영향 없음.
+      .catch(() => {});
     return () => {
       cancelled = true;
     };

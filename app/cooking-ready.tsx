@@ -11,7 +11,6 @@ import {
 import { useLocalSearchParams, useRouter } from "expo-router";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { Ionicons } from "@expo/vector-icons";
-import { LinearGradient } from "expo-linear-gradient";
 import {
   Colors,
   Spacing,
@@ -19,12 +18,13 @@ import {
   FontWeight,
   Radius,
   Shadows,
-  PrimaryGradient,
   LetterSpacing,
 } from "@/constants/theme";
 import { ConfirmModal } from "@/components/ConfirmModal";
 import { ErrorScreen } from "@/components/ErrorScreen";
 import { getRecipeDetail, type RecipeDetailDto } from "@/services/recipes";
+import { getErrorMessage } from "@/services/api";
+import { formatAmount } from "@/utils/recipeServings";
 import { getOwnedIngredientsByRecipe } from "@/services/userIngredients";
 
 // ─── Screen ───────────────────────────────────────────────────────────────────
@@ -32,8 +32,18 @@ import { getOwnedIngredientsByRecipe } from "@/services/userIngredients";
 export default function CookingReadyScreen() {
   const router = useRouter();
   const insets = useSafeAreaInsets();
-  const { id } = useLocalSearchParams<{ id: string }>();
+  const { id, servings } = useLocalSearchParams<{
+    id: string;
+    servings?: string;
+  }>();
   const recipeId = Number(id);
+  // 상세창에서 조절한 인분을 그대로 이어받음. 누락/invalid면 1.
+  // useState 초기화에만 쓰여 mount 이후 prop 변화는 무시 (의도된 동작 —
+  // 사용자가 이 화면 안에서 스테퍼로 자유 조절).
+  const initialPortions = (() => {
+    const n = Number(servings);
+    return Number.isFinite(n) && n >= 1 ? Math.floor(n) : 1;
+  })();
 
   const [recipe, setRecipe] = useState<RecipeDetailDto | null>(null);
   // Names from `/by-recipe` — authoritative source for the owned/missing
@@ -41,8 +51,11 @@ export default function CookingReadyScreen() {
   const [ownedNames, setOwnedNames] = useState<Set<string>>(new Set());
   const [isLoading, setIsLoading] = useState(true);
   const [isError, setIsError] = useState(false);
+  // 서버 에러 객체 보관용. ErrorScreen 메시지에 getErrorMessage로 주입.
+  // isError=true지만 loadError=null인 경우(예: invalid id)는 폴백만 표시.
+  const [loadError, setLoadError] = useState<unknown>(null);
 
-  const [portions, setPortions] = useState(1);
+  const [portions, setPortions] = useState(initialPortions);
   const [exitModalVisible, setExitModalVisible] = useState(false);
 
   useEffect(() => {
@@ -62,8 +75,12 @@ export default function CookingReadyScreen() {
         setRecipe(detail);
         setOwnedNames(new Set(owned.map((o) => o.name)));
         setIsError(false);
-      } catch {
-        if (!cancelled) setIsError(true);
+        setLoadError(null);
+      } catch (e) {
+        if (!cancelled) {
+          setIsError(true);
+          setLoadError(e);
+        }
       } finally {
         if (!cancelled) setIsLoading(false);
       }
@@ -85,7 +102,7 @@ export default function CookingReadyScreen() {
   if (isError) {
     return (
       <ErrorScreen
-        message="레시피 정보를 불러오지 못했어요"
+        message={getErrorMessage(loadError, "레시피 정보를 불러오지 못했어요")}
         subMessage="잠시 후 다시 시도해 주세요"
         buttonLabel="이전으로 돌아가기"
         onPressHome={() => router.back()}
@@ -160,11 +177,8 @@ export default function CookingReadyScreen() {
             </Pressable>
           </View>
 
-          {/* Owned ingredients — checklist style. The portion stepper still
-              renders so the user can preview servings, but the amount text
-              now shows the backend's display string verbatim (e.g. "200g")
-              because amounts come as strings. Re-introducing portion
-              scaling will move with the cooking-* rewrite that drops mocks. */}
+          {/* Owned/missing 모두 recipe-detail과 동일한 formatAmount로 인분
+              스케일링. "적당량" 같은 비수치 표기는 헬퍼가 원문 유지. */}
           {owned.map((item) => (
             <View key={item.name} style={styles.checkRow}>
               <Ionicons
@@ -173,7 +187,9 @@ export default function CookingReadyScreen() {
                 color={Colors.primaryContainer}
               />
               <Text style={styles.checkName}>{item.name}</Text>
-              <Text style={styles.checkQty}>{item.amount}</Text>
+              <Text style={styles.checkQty}>
+                {formatAmount(item.amount, portions)}
+              </Text>
             </View>
           ))}
 
@@ -190,7 +206,9 @@ export default function CookingReadyScreen() {
                     color={Colors.outlineVariant}
                   />
                   <Text style={styles.missingName}>{item.name}</Text>
-                  <Text style={styles.missingQty}>{item.amount}</Text>
+                  <Text style={styles.missingQty}>
+                    {formatAmount(item.amount, portions)}
+                  </Text>
                 </View>
               ))}
             </>
@@ -218,18 +236,12 @@ export default function CookingReadyScreen() {
             } as never)
           }
           style={({ pressed }) => [
-            pressed && { opacity: 0.9, transform: [{ scale: 0.98 }] },
+            styles.ctaButton,
+            pressed && { opacity: 0.85, transform: [{ scale: 0.97 }] },
           ]}
         >
-          <LinearGradient
-            colors={PrimaryGradient.colors as unknown as string[]}
-            start={PrimaryGradient.start}
-            end={PrimaryGradient.end}
-            style={styles.ctaGradient}
-          >
-            <Text style={styles.ctaText}>바로 요리하러 가기</Text>
-            <Ionicons name="play-circle" size={22} color={Colors.onPrimary} />
-          </LinearGradient>
+          <Text style={styles.ctaText}>바로 요리하러 가기</Text>
+          <Ionicons name="play" size={18} color={Colors.onPrimary} />
         </Pressable>
       </View>
 
@@ -452,19 +464,22 @@ const styles = StyleSheet.create({
       },
     }),
   },
-  ctaGradient: {
+  // cooking-step의 navBtnPrimary와 통일 — gradient/큰 텍스트로 인한 시각적
+  // 과중을 덜고 두 화면이 같은 톤의 primary CTA를 갖도록. "시작" 강조는
+  // play 아이콘으로 유지.
+  ctaButton: {
+    height: 56,
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "center",
-    gap: Spacing.md,
-    paddingVertical: Spacing.lg,
+    gap: Spacing.xs,
     borderRadius: Radius.xl,
+    backgroundColor: Colors.primary,
     ...Shadows.fab,
   },
   ctaText: {
-    fontSize: FontSize.titleLg,
+    fontSize: FontSize.bodyLg,
     fontWeight: FontWeight.bold,
     color: Colors.onPrimary,
-    letterSpacing: LetterSpacing.tight,
   },
 });

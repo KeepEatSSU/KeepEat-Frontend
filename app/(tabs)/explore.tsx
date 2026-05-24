@@ -208,7 +208,7 @@ export default function ExploreScreen() {
   if (error && !hasLoadedOnce) {
     return (
       <ErrorScreen
-        message="레시피를 불러오지 못했어요"
+        message={getErrorMessage(error, "레시피를 불러오지 못했어요")}
         subMessage="네트워크 상태를 확인하고 다시 시도해 주세요"
         onRetry={() => {
           setError(null);

@@ -69,6 +69,7 @@ export default function CookingCompleteScreen() {
   );
   const [isLoading, setIsLoading] = useState(true);
   const [isError, setIsError] = useState(false);
+  const [loadError, setLoadError] = useState<unknown>(null);
 
   // Selected keyed by user-ingredient id (not name) so the bulk delete call
   // can reference rows directly. Entries without a backend id are filtered
@@ -97,8 +98,12 @@ export default function CookingCompleteScreen() {
         setTitle(detail.recipeName);
         setIngredients(owned);
         setIsError(false);
-      } catch {
-        if (!cancelled) setIsError(true);
+        setLoadError(null);
+      } catch (e) {
+        if (!cancelled) {
+          setIsError(true);
+          setLoadError(e);
+        }
       } finally {
         if (!cancelled) setIsLoading(false);
       }
@@ -159,7 +164,7 @@ export default function CookingCompleteScreen() {
   if (isError) {
     return (
       <ErrorScreen
-        message="레시피 정보를 불러오지 못했어요"
+        message={getErrorMessage(loadError, "레시피 정보를 불러오지 못했어요")}
         subMessage="잠시 후 다시 시도해 주세요"
         buttonLabel="이전으로 돌아가기"
         onPressHome={() => router.back()}

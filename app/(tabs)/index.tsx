@@ -26,6 +26,7 @@ import {
   fetchAllIngredients,
   searchIngredients,
 } from "@/services/userIngredients";
+import { getErrorMessage } from "@/services/api";
 import { useNotifications } from "@/context/NotificationContext";
 import { getDDayInfo } from "@/utils/dateUtils";
 import { Ionicons } from "@expo/vector-icons";
@@ -493,13 +494,12 @@ export default function FridgeScreen() {
     }, []),
   );
 
-  // Entering the home tab marks both home-targeted notification types as
+  // Entering the home tab marks the home-targeted notification type as
   // read. markTypeRead has a no-op gate when there's nothing unread, so
   // firing on every focus is cheap (one render bailout + zero PATCH calls).
   useFocusEffect(
     useCallback(() => {
       markTypeRead("expiry_soon");
-      markTypeRead("weekly_cheer");
     }, [markTypeRead]),
   );
 
@@ -531,7 +531,7 @@ export default function FridgeScreen() {
   if (error && !hasLoadedOnce) {
     return (
       <ErrorScreen
-        message="냉장고를 열지 못했어요"
+        message={getErrorMessage(error, "냉장고를 열지 못했어요")}
         subMessage="네트워크 상태를 확인하고 다시 시도해 주세요"
         onRetry={() => {
           setError(null);

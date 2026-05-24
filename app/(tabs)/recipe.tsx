@@ -53,7 +53,6 @@ import {
   Spacing,
 } from "@/constants/theme";
 import type { ReactionType } from "@/constants/domain";
-import { useNotifications } from "@/context/NotificationContext";
 import { useRecipeRecommendation } from "@/context/RecipeRecommendationContext";
 import { getErrorMessage } from "@/services/api";
 import {
@@ -79,7 +78,6 @@ export default function RecipeScreen() {
   const { showToast, showNotification } = useToast();
   const { status, requestRecommendation, markSwiping, onComplete } =
     useRecipeRecommendation();
-  const { markTypeRead } = useNotifications();
 
   const [recipes, setRecipes] = useState<MyRecipeListEntryDto[]>([]);
   const [isLoading, setIsLoading] = useState(true);
@@ -126,12 +124,6 @@ export default function RecipeScreen() {
       fetchRecipes({ silent: hasLoadedOnce });
       // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [hasLoadedOnce]),
-  );
-
-  useFocusEffect(
-    useCallback(() => {
-      markTypeRead("notice");
-    }, [markTypeRead]),
   );
 
   // In-app notification when AI recommendation completes (existing behavior).
@@ -301,7 +293,7 @@ export default function RecipeScreen() {
   if (error && !hasLoadedOnce) {
     return (
       <ErrorScreen
-        message="레시피를 불러오지 못했어요"
+        message={getErrorMessage(error, "레시피를 불러오지 못했어요")}
         subMessage="네트워크 상태를 확인하고 다시 시도해 주세요"
         onRetry={() => {
           setError(null);

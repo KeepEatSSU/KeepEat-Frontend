@@ -6,6 +6,7 @@ import { PortalProvider } from "@gorhom/portal";
 import * as SplashScreen from "expo-splash-screen";
 import * as WebBrowser from "expo-web-browser";
 import { ToastProvider } from "@/components/Toast";
+import { PushPermissionPrompt } from "@/components/PushPermissionPrompt";
 import { RecipeRecommendationProvider } from "@/context/RecipeRecommendationContext";
 import { AuthProvider, useAuth } from "@/context/AuthContext";
 import { NotificationProvider } from "@/context/NotificationContext";
@@ -92,6 +93,7 @@ export default function RootLayout() {
             <ToastProvider>
               <AuthGate>
                 <IngredientMasterBootstrap />
+                <PushPermissionPrompt />
                 <Stack screenOptions={{ headerShown: false }}>
                   <Stack.Screen name="(tabs)" />
                   <Stack.Screen

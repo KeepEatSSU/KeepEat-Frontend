@@ -38,6 +38,7 @@ export function AppHeaderRight() {
     loadMore,
     markRead,
     markAllRead,
+    markTypeRead,
   } = useNotifications();
 
   const [notifVisible, setNotifVisible] = useState(false);
@@ -135,7 +136,14 @@ export function AppHeaderRight() {
         onClose={() => setProfileVisible(false)}
         onLogout={async () => {
           setProfileVisible(false);
-          await logout();
+          // 로그아웃은 즉시 로그인 화면으로 전환되므로 toast는 보일 시간이
+          // 없음 + 토큰은 이미 정리됨. 사용자 노출 메시지보다 unhandled
+          // rejection만 막는 best-effort 처리.
+          try {
+            await logout();
+          } catch (e) {
+            console.warn("[logout]", e);
+          }
         }}
         onDeleteAccount={handleDeleteAccountStart}
       />
@@ -160,7 +168,14 @@ export function AppHeaderRight() {
 
       <NotificationPopup
         visible={notifVisible}
-        onClose={() => setNotifVisible(false)}
+        onClose={() => {
+          // NOTICE는 목적지가 없으므로 destination screen의 useFocusEffect로
+          // 읽음 처리를 걸 수 없다. 대신 알림창에서 나가는 순간(상단 X, 카드
+          // 탭으로 인한 자동 close, 시스템 dismiss 어느 경로든) 일괄 읽음.
+          // markTypeRead는 unread가 없으면 no-op이므로 매 close마다 안전.
+          markTypeRead("notice");
+          setNotifVisible(false);
+        }}
         notifications={items}
         unreadCount={unreadCount}
         hasNext={hasNext}
