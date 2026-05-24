@@ -5,6 +5,7 @@ import { Ionicons } from "@expo/vector-icons";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import type { BottomTabBarProps } from "@react-navigation/bottom-tabs";
 import * as ImagePicker from "expo-image-picker";
+import { LinearGradient } from "expo-linear-gradient";
 import { AddMenuSheet } from "@/components/AddMenuSheet";
 import {
   Colors,
@@ -33,6 +34,11 @@ const TAB_CONFIG = {
     activeIcon: "receipt" as const,
     label: "내 레시피",
   },
+  mypage: {
+    icon: "person-circle-outline" as const,
+    activeIcon: "person-circle" as const,
+    label: "마이",
+  },
 };
 
 function FloatingTabBar({
@@ -43,14 +49,20 @@ function FloatingTabBar({
   const insets = useSafeAreaInsets();
 
   return (
-    <View
-      style={[
-        styles.tabBarWrapper,
-        { paddingBottom: Math.max(insets.bottom, 16) },
-      ]}
-      pointerEvents="box-none"
-    >
-      <View style={styles.tabBarPill}>
+    <View style={styles.tabBarWrapper} pointerEvents="box-none">
+      <LinearGradient
+        colors={[
+          "rgba(255, 255, 255, 0.4)",
+          "rgba(255, 255, 255, 0.9)",
+          "rgba(255, 255, 255, 1)",
+        ]}
+        start={{ x: 0, y: 0 }}
+        end={{ x: 0, y: 1 }}
+        style={[
+          styles.tabBarPill,
+          { paddingBottom: insets.bottom + Spacing.sm },
+        ]}
+      >
         {state.routes.map((route, index) => {
           const isFocused = state.index === index;
 
@@ -111,7 +123,7 @@ function FloatingTabBar({
             </Pressable>
           );
         })}
-      </View>
+      </LinearGradient>
     </View>
   );
 }
@@ -137,6 +149,7 @@ export default function TabLayout() {
         <Tabs.Screen name="explore" />
         <Tabs.Screen name="add" />
         <Tabs.Screen name="recipe" />
+        <Tabs.Screen name="mypage" />
       </Tabs>
 
       <AddMenuSheet
@@ -237,20 +250,30 @@ const styles = StyleSheet.create({
     bottom: 0,
     left: 0,
     right: 0,
-    alignItems: "center",
-    paddingHorizontal: Spacing.lg,
   },
   tabBarPill: {
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "space-around",
-    backgroundColor: Colors.glassBackground,
-    borderRadius: Radius.full,
+    borderTopLeftRadius: 20,
+    borderTopRightRadius: 20,
+    borderBottomLeftRadius: 0,
+    borderBottomRightRadius: 0,
     paddingHorizontal: Spacing.md,
-    paddingVertical: Spacing.sm,
-    width: "100%",
-    maxWidth: 400,
-    ...Shadows.ambient,
+    paddingTop: Spacing.sm,
+    overflow: "hidden",
+    ...Platform.select({
+      ios: {
+        shadowColor: "#191C1D",
+        shadowOffset: { width: 0, height: -2 },
+        shadowOpacity: 0.08,
+        shadowRadius: 8,
+      },
+      android: {
+        borderTopWidth: 1,
+        borderTopColor: "rgba(0, 0, 0, 0.06)",
+      },
+    }),
   },
   tabItem: {
     alignItems: "center",

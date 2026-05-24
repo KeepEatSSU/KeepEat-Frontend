@@ -4,6 +4,7 @@ import {
   AppSearchChipsHeader,
   type ChipConfig,
 } from "@/components/AppSearchChipsHeader";
+import { FridgeCategorySheet } from "@/components/FridgeCategorySheet";
 import { ErrorScreen } from "@/components/ErrorScreen";
 import { IngredientIcon } from "@/components/IngredientIcon";
 import { useToast } from "@/components/Toast";
@@ -298,21 +299,34 @@ export default function FridgeScreen() {
   const [hasLoadedOnce, setHasLoadedOnce] = useState(false);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<unknown>(null);
-  const [selectedFilter, setSelectedFilter] = useState("전체");
+  // 보관위치 단일 선택 — 카테고리와 mutex. 카테고리가 활성이면 storage는
+  // 항상 "전체"로 강제 리셋되고, 반대로 storage 선택 시 카테고리는 비워진다.
+  const [selectedFilter, setSelectedFilter] = useState<
+    "전체" | "실온" | "냉장" | "냉동"
+  >("전체");
+  // 카테고리 다중 선택 (OR). 빈 배열 = 카테고리 필터 미적용.
+  const [selectedCategories, setSelectedCategories] = useState<string[]>([]);
   const [searchQuery, setSearchQuery] = useState("");
-  const [categoryExpanded, setCategoryExpanded] = useState(false);
+  // 카테고리 다중 선택은 바텀시트로 — 이전 아코디언/categoryExpanded는 폐기.
+  const [filterSheetVisible, setFilterSheetVisible] = useState(false);
 
-  // ── Search focus + select-mode state ──
-  const [isSearchFocused, setIsSearchFocused] = useState(false);
+  // ── Search toggle + select-mode state ──
+  // searchOpen drives the (now hidden by default) search input row. The
+  // top-right search icon toggles it; the in-row × button closes + clears.
+  const [searchOpen, setSearchOpen] = useState(false);
   const [selectMode, setSelectMode] = useState(false);
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const searchInputRef = useRef<TextInput>(null);
 
-  const handleSearchFocus = () => setIsSearchFocused(true);
-  const handleSearchBlur = () => setIsSearchFocused(false);
+  const handleOpenSearch = () => {
+    setSearchOpen(true);
+    // 다음 프레임에 포커스를 줘서 TextInput가 마운트된 뒤 키보드를 띄운다.
+    setTimeout(() => searchInputRef.current?.focus(), 50);
+  };
 
-  const handleCancelSearch = () => {
+  const handleCloseSearch = () => {
     setSearchQuery("");
+    setSearchOpen(false);
     Keyboard.dismiss();
     searchInputRef.current?.blur();
   };
@@ -324,6 +338,9 @@ export default function FridgeScreen() {
       setSelectMode(false);
     } else {
       setSelectMode(true);
+      // 선택 모드 진입 시 열려 있던 검색은 닫는다 — 칩 줄의 "삭제" 칩이
+      // 현재 모드의 주체이므로 두 UI가 동시에 살아 있으면 헷갈린다.
+      setSearchOpen(false);
       Keyboard.dismiss();
     }
   };
@@ -379,86 +396,104 @@ export default function FridgeScreen() {
     fetchFridgeData({ silent: true });
   };
 
-  // Per-category ingredient count for expanded chips
-  const categoryCounts = useMemo(() => {
-    const map: Record<string, number> = {};
-    const cats = categories.filter((c) => c.type === "category");
-    for (const cat of cats) {
-      map[cat.label] = ingredients.filter(
-        (i) => i.category === cat.label,
-      ).length;
-    }
-    return map;
-  }, [ingredients, categories]);
-
   // The list shown to the user — server-search results take precedence over
   // the full list when the user has typed something.
   const displayedIngredients = searchResults ?? ingredients;
 
-  // Chip list for the search-and-chips header. Memoized so the chip array
-  // identity is stable across re-renders triggered by unrelated state.
-  const fridgeChips = useMemo<ChipConfig[]>(() => {
-    const hasSelectedSubcategory = categories.some(
-      (c) => c.type === "category" && c.label === selectedFilter,
-    );
-    const triggerSelected = categoryExpanded || hasSelectedSubcategory;
+  // 카테고리별 식재료 수 — 시트의 카테고리 칩에 표시/비활성화 판단에 쓰임.
+  // searchResults가 아닌 전체 ingredients 기준 (시트는 카테고리 필터 전용이고
+  // 검색어와 무관해야 함). 아이템 추가/삭제 시 자연스럽게 재계산.
+  const categoryCounts = useMemo(() => {
+    const map: Record<string, number> = {};
+    for (const item of ingredients) {
+      if (item.category) {
+        map[item.category] = (map[item.category] ?? 0) + 1;
+      }
+    }
+    return map;
+  }, [ingredients]);
 
-    const standard: ChipConfig[] = categories
-      .filter((c) => c.type === "all" || c.type === "storageType")
+  // 칩 줄을 [전체][실온][냉장][냉동][필터][삭제] 6개로 고정. 카테고리는
+  // mutex로 묶음 — selectedCategories.length>0이면 "필터" 칩만 활성으로 보이고
+  // storage/전체 칩은 모두 unselected로 죽인다 (한 axis만 가시화).
+  const hasCategoryFilter = selectedCategories.length > 0;
+
+  const fridgeChips = useMemo<ChipConfig[]>(() => {
+    const allChip: ChipConfig = {
+      key: "all",
+      label: "전체",
+      isSelected: selectedFilter === "전체" && !hasCategoryFilter,
+      onPress: () => {
+        setSelectedFilter("전체");
+        setSelectedCategories([]);
+      },
+    };
+
+    const storageChips: ChipConfig[] = categories
+      .filter((c) => c.type === "storageType")
       .map((cat) => ({
         key: cat.id,
         label: cat.label,
-        isSelected: selectedFilter === cat.label && !categoryExpanded,
+        isSelected: selectedFilter === cat.label && !hasCategoryFilter,
         onPress: () => {
-          setCategoryExpanded(false);
-          setSelectedFilter(cat.label);
+          // 보관위치 선택 시 카테고리는 비워서 mutex 유지.
+          setSelectedFilter(cat.label as "실온" | "냉장" | "냉동");
+          setSelectedCategories([]);
         },
       }));
 
-    const trigger: ChipConfig = {
-      key: "category-trigger",
-      label:
-        !categoryExpanded && hasSelectedSubcategory
-          ? selectedFilter
-          : "상세 카테고리",
-      isSelected: triggerSelected,
-      onPress: () => setCategoryExpanded((v) => !v),
+    const filterChip: ChipConfig = {
+      key: "filter",
+      label: "필터",
+      isSelected: hasCategoryFilter,
+      // 선택된 카테고리 수를 chip의 count 뱃지로 표시 — 0이면 자동 숨김.
+      count: hasCategoryFilter ? selectedCategories.length : undefined,
+      onPress: () => setFilterSheetVisible(true),
       variant: "trigger",
       trailingIcon: (
         <Ionicons
-          name={categoryExpanded ? "chevron-up" : "grid-outline"}
+          name="options-outline"
           size={14}
           color={
-            triggerSelected ? Colors.onPrimary : Colors.onSurfaceVariant
+            hasCategoryFilter ? Colors.onPrimary : Colors.onSurfaceVariant
           }
         />
       ),
     };
 
-    return [...standard, trigger];
-  }, [categories, selectedFilter, categoryExpanded]);
+    const deleteChip: ChipConfig = {
+      key: "delete-mode",
+      label: selectMode ? "취소" : "삭제",
+      isSelected: selectMode,
+      variant: "destructive",
+      onPress: handleToggleSelectMode,
+      trailingIcon: !selectMode ? (
+        <Ionicons name="trash-outline" size={14} color={Colors.primary} />
+      ) : undefined,
+    };
 
-  // ── Filtered ingredients (category/storage chip applied to base list) ──
+    return [allChip, ...storageChips, filterChip, deleteChip];
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [categories, selectedFilter, hasCategoryFilter, selectedCategories.length, selectMode]);
+
+  // ── Filtered ingredients (category OR / storage 단일, mutex) ──
   const filteredIngredients = useMemo(() => {
+    const storageMap: Record<string, StorageType> = {
+      실온: "room",
+      냉장: "fridge",
+      냉동: "frozen",
+    };
     return displayedIngredients
       .filter((item) => {
-        if (selectedFilter === "전체") return true;
-        const matchedCat = categories.find((c) => c.label === selectedFilter);
-        if (!matchedCat) return true;
-        if (matchedCat.type === "storageType") {
-          const storageMap: Record<string, StorageType> = {
-            실온: "room",
-            냉장: "fridge",
-            냉동: "frozen",
-          };
-          return item.storageType === storageMap[matchedCat.label];
-        }
-        if (matchedCat.type === "category") {
+        // 카테고리 axis가 활성이면 OR 매칭만 본다 — mutex 덕에 storage는
+        // 이미 "전체"로 강제된 상태라 더 볼 게 없음.
+        if (selectedCategories.length > 0) {
           // `item.category` is already canonicalized to one of the 10 master
           // categories via `categoryFromApi` in the mapper.
-          return item.category === matchedCat.label;
+          return selectedCategories.includes(item.category);
         }
-        return true;
+        if (selectedFilter === "전체") return true;
+        return item.storageType === storageMap[selectedFilter];
       })
       .sort((a, b) => {
         const infoA = getDDayInfo(a.expirationDate);
@@ -469,7 +504,7 @@ export default function FridgeScreen() {
         if (infoB.daysLeft === Infinity) return -1;
         return infoA.daysLeft - infoB.daysLeft;
       });
-  }, [displayedIngredients, categories, selectedFilter]);
+  }, [displayedIngredients, selectedFilter, selectedCategories]);
 
   async function fetchFridgeData(opts: { silent?: boolean } = {}) {
     if (!opts.silent && !hasLoadedOnce) setIsLoading(true);
@@ -543,12 +578,26 @@ export default function FridgeScreen() {
 
   return (
     <View style={[styles.screen, { paddingTop: insets.top }]}>
-      {/* Header */}
+      {/* Header — 로고(좌) / 알림 + 검색 아이콘(우) 한 줄 */}
       <View style={styles.header}>
         <View style={styles.headerLeft}>
           <AppHeaderLogo />
         </View>
-        <AppHeaderRight />
+        <View style={styles.headerRight}>
+          <AppHeaderRight />
+          <Pressable
+            onPress={handleOpenSearch}
+            accessibilityRole="button"
+            accessibilityLabel="검색 열기"
+            hitSlop={8}
+            style={({ pressed }) => [
+              styles.headerIconBtn,
+              pressed && { opacity: 0.6 },
+            ]}
+          >
+            <Ionicons name="search" size={22} color={Colors.onSurface} />
+          </Pressable>
+        </View>
       </View>
 
       {isLoading ? (
@@ -564,126 +613,26 @@ export default function FridgeScreen() {
             searchValue={searchQuery}
             onSearchChange={setSearchQuery}
             searchInputRef={searchInputRef}
-            onSearchFocus={handleSearchFocus}
-            onSearchBlur={handleSearchBlur}
-            searchEditable={!selectMode}
+            showSearch={searchOpen}
             chips={fridgeChips}
+            chipsLayout="fitted"
             searchRightSlot={
-              <>
-                {/*
-                  Axis A: selectMode off ↔ on
-                    → Same slot, same width, only text + bg color swap.
-                  Axis B: search unfocused ↔ focused
-                    → Right button unmounts; "취소" text slot fades in.
-                    selectMode is gated by `searchEditable={!selectMode}` so
-                    the two axes never overlap.
-                */}
-                {!isSearchFocused && (
-                  <Animated.View
-                    key="select-slot"
-                    entering={FadeIn.duration(200)}
-                    exiting={FadeOut.duration(180)}
-                    style={styles.selectBtnSlot}
-                  >
-                    <Pressable
-                      onPress={handleToggleSelectMode}
-                      accessibilityRole="button"
-                      accessibilityLabel={
-                        selectMode ? "선택 모드 취소" : "선택 모드 진입"
-                      }
-                      style={({ pressed }) => [
-                        styles.selectBtn,
-                        selectMode && styles.selectBtnActive,
-                        pressed && { opacity: 0.75 },
-                      ]}
-                    >
-                      <Text
-                        style={[
-                          styles.selectBtnText,
-                          selectMode && styles.selectBtnTextActive,
-                        ]}
-                      >
-                        {selectMode ? "취소" : "선택"}
-                      </Text>
-                    </Pressable>
-                  </Animated.View>
-                )}
-                {isSearchFocused && (
-                  <Animated.View
-                    key="cancel-slot"
-                    entering={FadeIn.duration(200)}
-                    exiting={FadeOut.duration(140)}
-                    style={styles.cancelSlot}
-                  >
-                    <Pressable
-                      onPress={handleCancelSearch}
-                      accessibilityRole="button"
-                      accessibilityLabel="검색 취소"
-                      style={({ pressed }) => [
-                        styles.cancelTextBtn,
-                        pressed && { opacity: 0.6 },
-                      ]}
-                    >
-                      <Text style={styles.cancelTextBtnText}>취소</Text>
-                    </Pressable>
-                  </Animated.View>
-                )}
-              </>
-            }
-            belowChipsSlot={
-              categoryExpanded ? (
-                <View style={styles.expandedArea}>
-                  {categories
-                    .filter((c) => c.type === "category")
-                    .map((cat) => {
-                      const count = categoryCounts[cat.label] ?? 0;
-                      const hasItems = count > 0;
-                      const isSelected = selectedFilter === cat.label;
-
-                      return (
-                        <Pressable
-                          key={cat.id}
-                          onPress={() => {
-                            setSelectedFilter(cat.label);
-                            setCategoryExpanded(false);
-                          }}
-                          style={[
-                            styles.expandedChip,
-                            isSelected && styles.expandedChipSelected,
-                            !hasItems && styles.expandedChipEmpty,
-                          ]}
-                        >
-                          <Text
-                            style={[
-                              styles.expandedChipText,
-                              isSelected && styles.expandedChipTextSelected,
-                              !hasItems && styles.expandedChipTextEmpty,
-                            ]}
-                          >
-                            {cat.label}
-                          </Text>
-                          {hasItems && (
-                            <View
-                              style={[
-                                styles.chipBadge,
-                                isSelected && styles.chipBadgeSelected,
-                              ]}
-                            >
-                              <Text
-                                style={[
-                                  styles.chipBadgeText,
-                                  isSelected && styles.chipBadgeTextSelected,
-                                ]}
-                              >
-                                {count}
-                              </Text>
-                            </View>
-                          )}
-                        </Pressable>
-                      );
-                    })}
-                </View>
-              ) : undefined
+              <Pressable
+                onPress={handleCloseSearch}
+                accessibilityRole="button"
+                accessibilityLabel="검색 닫기"
+                hitSlop={8}
+                style={({ pressed }) => [
+                  styles.searchCloseBtn,
+                  pressed && { opacity: 0.6 },
+                ]}
+              >
+                <Ionicons
+                  name="close"
+                  size={22}
+                  color={Colors.onSurfaceVariant}
+                />
+              </Pressable>
             }
           />
 
@@ -708,20 +657,32 @@ export default function FridgeScreen() {
             </ScrollView>
           ) : (
             <View style={styles.emptyContainer}>
-              <Ionicons
-                name={
-                  searchQuery.trim() === "" && selectedFilter === "전체"
-                    ? "cube-outline"
-                    : "search-outline"
-                }
-                size={48}
-                color={Colors.outlineVariant}
-              />
-              <Text style={styles.emptyText}>
-                {searchQuery.trim() === "" && selectedFilter === "전체"
-                  ? "냉장고가 비어있어요"
-                  : "검색된 식재료가 없습니다."}
-              </Text>
+              {(() => {
+                // 진짜 "냉장고 텅 빔" = 검색 없음 + 모든 필터 미적용.
+                const isTrulyEmpty =
+                  searchQuery.trim() === "" &&
+                  selectedFilter === "전체" &&
+                  selectedCategories.length === 0;
+                return (
+                  <>
+                    <Ionicons
+                      name={isTrulyEmpty ? "cube-outline" : "search-outline"}
+                      size={48}
+                      color={Colors.outlineVariant}
+                    />
+                    <Text style={styles.emptyText}>
+                      {isTrulyEmpty
+                        ? "냉장고가 비어있어요"
+                        : "검색된 식재료가 없습니다."}
+                    </Text>
+                    {isTrulyEmpty && (
+                      <Text style={styles.emptySubText}>
+                        아래 + 버튼을 눌러 식재료를 등록해보세요
+                      </Text>
+                    )}
+                  </>
+                );
+              })()}
             </View>
           )}
         </View>
@@ -772,6 +733,19 @@ export default function FridgeScreen() {
         </Animated.View>
       )}
 
+      <FridgeCategorySheet
+        visible={filterSheetVisible}
+        value={selectedCategories}
+        counts={categoryCounts}
+        onApply={(categories) => {
+          setSelectedCategories(categories);
+          // 비어있지 않으면 mutex로 storage 강제 리셋. 빈 배열이면 storage는
+          // 그대로 둠 — 사용자가 시트에서 카테고리만 비웠다고 보관위치까지
+          // 풀어버리면 의도와 어긋남.
+          if (categories.length > 0) setSelectedFilter("전체");
+        }}
+        onClose={() => setFilterSheetVisible(false)}
+      />
     </View>
   );
 }
@@ -791,11 +765,23 @@ const styles = StyleSheet.create({
     alignItems: "center",
     paddingHorizontal: Spacing.xl,
     paddingTop: Spacing.base,
-    paddingBottom: Spacing.md,
+    paddingBottom: Spacing.sm,
   },
   headerLeft: {
     flexDirection: "row",
     alignItems: "center",
+  },
+  headerRight: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: Spacing.xs,
+  },
+  headerIconBtn: {
+    width: 40,
+    height: 40,
+    borderRadius: Radius.full,
+    alignItems: "center",
+    justifyContent: "center",
   },
 
   // Content area (below header, when loaded)
@@ -803,51 +789,13 @@ const styles = StyleSheet.create({
     flex: 1,
   },
 
-  // Axis A slot — holds the select/cancel pill when search is not focused.
-  // Fixed width via pill padding keeps the search bar's flex width identical
-  // whether selectMode is off or on (선택 ↔ 취소 = color swap only).
-  selectBtnSlot: {
-    marginLeft: Spacing.sm,
-    justifyContent: "center",
-  },
-  // Axis B slot — external cancel text during search focus. Minimal padding
-  // so the search bar absorbs the maximum width released by the select slot.
-  cancelSlot: {
+  // 검색 닫기 (×) — 펼쳐진 검색 입력창 오른쪽에 붙는 toggle-off.
+  searchCloseBtn: {
     marginLeft: Spacing.xs,
-    justifyContent: "center",
-  },
-  selectBtn: {
-    minHeight: 44,
-    paddingHorizontal: Spacing.base,
-    borderRadius: Radius.full,
-    backgroundColor: Colors.fieldBackground,
-    alignItems: "center",
-    justifyContent: "center",
-  },
-  selectBtnActive: {
-    backgroundColor: Colors.primary,
-  },
-  selectBtnText: {
-    fontSize: FontSize.bodyMd,
-    fontWeight: FontWeight.semiBold,
-    color: Colors.onSurface,
-  },
-  selectBtnTextActive: {
-    color: Colors.onPrimary,
-  },
-  // iOS-style "Cancel" next to the focused search bar — no pill, minimal padding
-  // so the search bar naturally expands to fill the released space.
-  cancelTextBtn: {
     paddingHorizontal: Spacing.xs,
-    paddingVertical: Spacing.md,
     minHeight: 44,
     alignItems: "center",
     justifyContent: "center",
-  },
-  cancelTextBtnText: {
-    fontSize: FontSize.bodyMd,
-    fontWeight: FontWeight.medium,
-    color: Colors.primary,
   },
 
   // Bottom action bar (select mode)
@@ -902,6 +850,13 @@ const styles = StyleSheet.create({
     fontWeight: FontWeight.medium,
     color: Colors.onSurfaceVariant,
   },
+  emptySubText: {
+    fontSize: FontSize.bodySm,
+    fontWeight: FontWeight.regular,
+    color: Colors.outline,
+    textAlign: "center",
+    marginTop: -Spacing.xs,
+  },
 
   // Loading
   loadingContainer: {
@@ -914,60 +869,6 @@ const styles = StyleSheet.create({
     fontSize: FontSize.bodyMd,
     fontWeight: FontWeight.medium,
     color: Colors.onSurfaceVariant,
-  },
-
-  // Expanded category area (inline wrap, rendered via AppSearchChipsHeader's
-  // belowChipsSlot when the user expands the trigger chip).
-  expandedArea: {
-    flexDirection: "row",
-    flexWrap: "wrap",
-    paddingHorizontal: Spacing.xl,
-    gap: Spacing.sm,
-    marginBottom: Spacing.base,
-  },
-  expandedChip: {
-    height: 34,
-    flexDirection: "row",
-    alignItems: "center",
-    paddingHorizontal: Spacing.md,
-    backgroundColor: Colors.surfaceContainerHigh,
-    borderRadius: Radius.md,
-    gap: Spacing.xs,
-  },
-  expandedChipSelected: {
-    backgroundColor: Colors.primary,
-  },
-  expandedChipEmpty: {
-    opacity: 0.45,
-  },
-  expandedChipText: {
-    fontSize: FontSize.labelMd,
-    lineHeight: 18,
-    fontWeight: FontWeight.semiBold,
-    color: Colors.onSurfaceVariant,
-  },
-  expandedChipTextSelected: {
-    color: Colors.onPrimary,
-  },
-  expandedChipTextEmpty: {
-    color: Colors.outline,
-  },
-  chipBadge: {
-    backgroundColor: Colors.secondaryContainer,
-    paddingHorizontal: 5,
-    paddingVertical: 1,
-    borderRadius: Radius.full,
-  },
-  chipBadgeSelected: {
-    backgroundColor: "rgba(255, 255, 255, 0.25)",
-  },
-  chipBadgeText: {
-    fontSize: FontSize.labelSm,
-    fontWeight: FontWeight.bold,
-    color: Colors.onSecondaryContainer,
-  },
-  chipBadgeTextSelected: {
-    color: Colors.onPrimary,
   },
 
   // Ingredient Grid — paddingHorizontal + gap MUST match the constants used

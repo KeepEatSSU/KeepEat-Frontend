@@ -38,7 +38,7 @@ export function NotificationBell({ unreadCount, onPress }: Props) {
       <Ionicons
         name="notifications-outline"
         size={22}
-        color={Colors.primary}
+        color={Colors.onSurface}
       />
       {hasUnread && (
         <View style={styles.badge} pointerEvents="none">

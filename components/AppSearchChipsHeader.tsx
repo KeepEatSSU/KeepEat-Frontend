@@ -37,6 +37,11 @@ import {
   TextInput,
   View,
 } from "react-native";
+import Animated, {
+  LinearTransition,
+  SlideInRight,
+  SlideOutRight,
+} from "react-native-reanimated";
 
 export interface ChipConfig {
   key: string;
@@ -54,8 +59,11 @@ export interface ChipConfig {
    * `trigger` is currently visually identical to `default` — the prop
    * exists so callers can mark trigger-style chips for future styling
    * differentiation without re-wiring the API.
+   * `destructive` renders with a primary-color outline (idle) and primary
+   * fill when selected — used by the fridge tab's "삭제" select-mode trigger
+   * that needs to stand out from filter chips.
    */
-  variant?: "default" | "trigger";
+  variant?: "default" | "trigger" | "destructive";
   /**
    * Rendered to the right of the label. The chip's `gap` handles spacing
    * automatically; the caller supplies a pre-styled node (color, size).
@@ -75,16 +83,14 @@ interface Props {
   belowChipsSlot?: ReactNode;
   /**
    * Chip layout strategy.
-   *   `"scroll"` (default): single-row horizontal ScrollView. Currently used
-   *     by both tabs — the fridge tab pairs it with an expand-to-grid
-   *     trigger, the recipe tab leans on horizontal paging since users
-   *     typically have small (<50) saved-recipe libraries where the category
-   *     filter is a secondary tool.
+   *   `"scroll"` (default): single-row horizontal ScrollView.
    *   `"grid"`: flex-wrap multi-row grid that shows all chips at once.
-   *     No current callers — kept for the case where a screen has a fixed,
-   *     fully-visible category set worth surfacing without scrolling.
+   *   `"fitted"`: single row, no scroll, each chip `flex: 1` with tight
+   *     padding so a fixed small chip count (e.g. 6) fits the screen width
+   *     even on the narrowest phones. Tradeoff: chips share equal width
+   *     regardless of label length — best when labels are short (2–3 chars).
    */
-  chipsLayout?: "scroll" | "grid";
+  chipsLayout?: "scroll" | "grid" | "fitted";
   /**
    * Whether to render the built-in search row. Defaults to `true`. Set to
    * `false` when the surrounding screen hoists the search bar somewhere else
@@ -113,24 +119,37 @@ export function AppSearchChipsHeader({
   onSearchBlur,
   searchEditable,
 }: Props) {
-  const chipsMarginBottom = belowChipsSlot ? Spacing.xs : Spacing.lg;
+  // 칩 줄과 다음 콘텐츠(그리드 등) 사이는 좁게 유지 — 이전 Spacing.lg(20)는
+  // 시각적으로 떠 보였다. belowChipsSlot이 있건 없건 동일하게 xs로 통일.
+  const chipsMarginBottom = Spacing.xs;
 
   const renderChip = (chip: ChipConfig) => {
     const showBadge = chip.count !== undefined && chip.count > 0;
     const isFaint = chip.count === 0 && !chip.isSelected;
+    const isDestructive = chip.variant === "destructive";
     return (
       <Pressable
         key={chip.key}
         onPress={chip.onPress}
         accessibilityRole="button"
         accessibilityState={{ selected: chip.isSelected }}
-        style={[styles.chip, chip.isSelected && styles.chipSelected]}
+        style={[
+          styles.chip,
+          chipsLayout === "fitted" && styles.chipFitted,
+          isDestructive && styles.chipDestructive,
+          chip.isSelected &&
+            (isDestructive ? styles.chipDestructiveSelected : styles.chipSelected),
+        ]}
       >
         <Text
           style={[
             styles.chipText,
+            isDestructive && styles.chipTextDestructive,
             isFaint && styles.chipTextFaint,
-            chip.isSelected && styles.chipTextSelected,
+            chip.isSelected &&
+              (isDestructive
+                ? styles.chipTextDestructiveSelected
+                : styles.chipTextSelected),
           ]}
           numberOfLines={1}
         >
@@ -160,9 +179,18 @@ export function AppSearchChipsHeader({
 
   return (
     <>
-      {/* ── Search row ── */}
+      {/* ── Search row ──
+          헤더 우측 검색 아이콘에서 풀려나오는 시각을 살리기 위해 우측
+          off-screen → 제자리로 슬라이드 인/아웃. 칩 row는 자기 Y 위치 변경을
+          LinearTransition으로 보간 → 두 축이 충돌 없이 동시에 부드럽게.
+          (width 0→full 직접 애니메이션은 텍스트 reflow 위험이 있어 transform
+          기반의 슬라이드로 회피.) */}
       {showSearch && (
-        <View style={styles.searchRow}>
+        <Animated.View
+          entering={SlideInRight.duration(250)}
+          exiting={SlideOutRight.duration(180)}
+          style={styles.searchRow}
+        >
           <View style={styles.searchBar}>
             <Ionicons
               name="search"
@@ -198,26 +226,34 @@ export function AppSearchChipsHeader({
             )}
           </View>
           {searchRightSlot}
-        </View>
+        </Animated.View>
       )}
 
       {/* ── Chip row ── */}
-      {chipsLayout === "grid" ? (
-        <View
-          style={[styles.chipsGrid, { marginBottom: chipsMarginBottom }]}
-        >
-          {chips.map(renderChip)}
-        </View>
-      ) : (
-        <ScrollView
-          horizontal
-          showsHorizontalScrollIndicator={false}
-          contentContainerStyle={styles.chipsContent}
-          style={[styles.chipsScroll, { marginBottom: chipsMarginBottom }]}
-        >
-          {chips.map(renderChip)}
-        </ScrollView>
-      )}
+      <Animated.View layout={LinearTransition.duration(250)}>
+        {chipsLayout === "grid" ? (
+          <View
+            style={[styles.chipsGrid, { marginBottom: chipsMarginBottom }]}
+          >
+            {chips.map(renderChip)}
+          </View>
+        ) : chipsLayout === "fitted" ? (
+          <View
+            style={[styles.chipsFitted, { marginBottom: chipsMarginBottom }]}
+          >
+            {chips.map(renderChip)}
+          </View>
+        ) : (
+          <ScrollView
+            horizontal
+            showsHorizontalScrollIndicator={false}
+            contentContainerStyle={styles.chipsContent}
+            style={[styles.chipsScroll, { marginBottom: chipsMarginBottom }]}
+          >
+            {chips.map(renderChip)}
+          </ScrollView>
+        )}
+      </Animated.View>
 
       {belowChipsSlot}
     </>
@@ -280,6 +316,16 @@ const styles = StyleSheet.create({
     backgroundColor: Colors.surfaceContainerHigh,
     borderRadius: Radius.md,
   },
+  // Fitted mode override — chips share a fixed gap and split the leftover
+  // width equally via `flexGrow: 1`. Each chip's natural content size is its
+  // baseline (so trailing-icon chips stay a touch wider than 2-char ones) and
+  // the extra room is added on top, evenly, for consistent breathing across
+  // screen widths.
+  chipFitted: {
+    flexGrow: 1,
+    paddingHorizontal: Spacing.xs,
+    gap: 2,
+  },
   chipSelected: {
     backgroundColor: Colors.primary,
   },
@@ -296,6 +342,23 @@ const styles = StyleSheet.create({
   // categories with zero recipes recede without becoming undiscoverable.
   chipTextFaint: {
     color: Colors.outline,
+  },
+  // Destructive variant — primary outline on white (idle) and primary fill
+  // when selected, so it stands apart from neutral filter chips.
+  chipDestructive: {
+    backgroundColor: Colors.surfaceContainerLowest,
+    borderWidth: 1,
+    borderColor: Colors.primary,
+  },
+  chipDestructiveSelected: {
+    backgroundColor: Colors.primary,
+    borderColor: Colors.primary,
+  },
+  chipTextDestructive: {
+    color: Colors.primary,
+  },
+  chipTextDestructiveSelected: {
+    color: Colors.onPrimary,
   },
 
   // Count badge — same idiom as the fridge tab's expanded-category counts:
@@ -327,6 +390,16 @@ const styles = StyleSheet.create({
   chipsGrid: {
     flexDirection: "row",
     flexWrap: "wrap",
+    paddingHorizontal: Spacing.xl,
+    paddingVertical: Spacing.sm,
+    gap: Spacing.sm,
+  },
+  // Fitted single-row container — fixed `gap` between chips so spacing reads
+  // consistently across phones; chips themselves carry `flexGrow: 1` to split
+  // the leftover width.
+  chipsFitted: {
+    flexDirection: "row",
+    alignItems: "center",
     paddingHorizontal: Spacing.xl,
     paddingVertical: Spacing.sm,
     gap: Spacing.sm,

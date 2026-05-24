@@ -1,10 +1,12 @@
 import { useEffect } from "react";
+import { Platform } from "react-native";
 import { Stack, useRouter, useSegments } from "expo-router";
 import { StatusBar } from "expo-status-bar";
 import { GestureHandlerRootView } from "react-native-gesture-handler";
 import { PortalProvider } from "@gorhom/portal";
 import * as SplashScreen from "expo-splash-screen";
 import * as WebBrowser from "expo-web-browser";
+import * as NavigationBar from "expo-navigation-bar";
 import { ToastProvider } from "@/components/Toast";
 import { PushPermissionPrompt } from "@/components/PushPermissionPrompt";
 import { RecipeRecommendationProvider } from "@/context/RecipeRecommendationContext";
@@ -82,6 +84,16 @@ export default function RootLayout() {
         console.log("🔔 Expo Push Token:", token);
       }
     });
+  }, []);
+
+  // Android system navigation bar: match the tab bar's white bottom so the
+  // 3-button / gesture area blends into our bar. Under edge-to-edge the OS
+  // may keep the bar transparent and only honor button style — that's fine,
+  // our gradient already draws opaque white behind the inset area.
+  useEffect(() => {
+    if (Platform.OS !== "android") return;
+    NavigationBar.setBackgroundColorAsync("#FFFFFF").catch(() => {});
+    NavigationBar.setButtonStyleAsync("dark").catch(() => {});
   }, []);
 
   return (
