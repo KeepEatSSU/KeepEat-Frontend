@@ -517,20 +517,26 @@ export default function RecipeSwipeScreen() {
     setCurrentIndex((i) => i + 1);
   }, [currentIndex, recommendedRecipes, discardRecipe]);
 
+  // Exit/complete/retry all land on the My-Recipe tab explicitly. Earlier
+  // `router.back()` happened to work when entered from the recipe tab but
+  // popped to whatever tab was active when the user tapped a RECIPE_READY
+  // push (typically the fridge on cold start) — the apparent "내 레시피로
+  // 돌아감" was incidental, not designed. `replace` instead of `push` so
+  // back-gesture from /recipe doesn't resurface the consumed swipe deck.
   const handleExit = () => {
     setExitModalVisible(false);
     finishSwiping();
-    router.back();
+    router.replace("/(tabs)/recipe" as never);
   };
 
   const handleComplete = () => {
     finishSwiping();
-    router.back();
+    router.replace("/(tabs)/recipe" as never);
   };
 
   const handleRetry = () => {
     reset();
-    router.back();
+    router.replace("/(tabs)/recipe" as never);
   };
 
   return (

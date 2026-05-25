@@ -24,6 +24,7 @@ import {
   TextInput,
   View,
 } from "react-native";
+import * as Haptics from "expo-haptics";
 import { useFocusEffect, useRouter } from "expo-router";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { Ionicons } from "@expo/vector-icons";
@@ -209,6 +210,7 @@ export default function RecipeScreen() {
   };
 
   const enterSelectionMode = useCallback((firstId: number) => {
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium).catch(() => {});
     setSelectionMode(true);
     setSelectedIds(new Set([firstId]));
   }, []);

@@ -18,6 +18,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { ActivityIndicator, FlatList, Modal, Pressable, StyleSheet, Text, View } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
+import * as Haptics from "expo-haptics";
 import { useRouter } from "expo-router";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import {
@@ -336,7 +337,12 @@ export function NotificationPopup({
               <View />
             )}
             <Pressable
-              onPress={() => setSelectMode(true)}
+              onPress={() => {
+                Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium).catch(
+                  () => {},
+                );
+                setSelectMode(true);
+              }}
               accessibilityRole="button"
               accessibilityLabel="알림 삭제 모드"
               hitSlop={6}
