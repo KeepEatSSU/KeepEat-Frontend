@@ -115,9 +115,15 @@ export default function LoginScreen() {
         behavior={Platform.OS === "ios" ? "padding" : "height"}
       >
         <ScrollView
+          style={styles.scroll}
           contentContainerStyle={styles.scrollContent}
           showsVerticalScrollIndicator={false}
           keyboardShouldPersistTaps="handled"
+          // iOS: 포커스된 TextInput이 키보드에 가리지 않도록 ScrollView가
+          // contentInset을 자동 조정 (RN 0.73+, Android 무시).
+          automaticallyAdjustKeyboardInsets
+          // 스크롤 시작하면 키보드 dismiss — 입력 후 자연스럽게 닫힘.
+          keyboardDismissMode="on-drag"
         >
           {/* Hero */}
           <View style={styles.hero}>
@@ -299,6 +305,11 @@ const styles = StyleSheet.create({
   screen: {
     flex: 1,
     backgroundColor: Colors.surface,
+  },
+  // KAV가 키보드 시 자기 영역을 줄일 때 ScrollView가 그 줄어든 공간을
+  // flex:1로 정확히 채우도록 명시 — 콘텐츠 스크롤이 보장됨.
+  scroll: {
+    flex: 1,
   },
   scrollContent: {
     paddingHorizontal: Spacing.xl,

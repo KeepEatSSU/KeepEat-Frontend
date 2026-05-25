@@ -284,6 +284,12 @@ export type LoginResponse = {
 export type UserInfo = {
   id: number | string;
   email: string;
+  /**
+   * 사용자가 가입 시 입력(LOCAL) 또는 백엔드가 소셜 프로필에서 가져온 표시명.
+   * 구글 가입자 등 일부 경로에서 null로 올 가능성이 있어 string | null로 둔다.
+   * 화면에서 사용 시 trim 후 폴백 (이메일 앞부분 등)을 거치도록.
+   */
+  nickname: string | null;
   role: string;
   /**
    * 가입/로그인 경로. 백엔드가 "LOCAL"(이메일) 또는 "google"(소셜)로 보냄.

@@ -116,8 +116,13 @@ export function mapOcrCandidateToDraft(
       nickname: candidate.customName ?? "",
       quantity: candidate.quantity,
       unit,
+      // UNMATCHED는 마스터 보관옵션이 없어 storage 선택 시 autoExpiry 계산
+      // 경로(IngredientEditCard.handleStorageChange)도 ingredientId null에
+      // 막혀 스킵된다. 결과적으로 expirationDate가 null로 남아 POST에서
+      // 누락되는 경로 — 기본 7일 폴백으로 미리 채워 UI에도 즉시 표시.
+      // 사용자는 그 값을 보고 필요시 직접 수정 가능.
       storage: null,
-      expirationDate: null,
+      expirationDate: startOfDayPlus(7),
     };
   }
 

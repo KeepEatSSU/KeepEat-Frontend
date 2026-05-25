@@ -51,6 +51,10 @@ export default function SignupScreen() {
   const [codeSent, setCodeSent] = useState(false);
   const [verifyCode, setVerifyCode] = useState("");
   const [verifyError, setVerifyError] = useState("");
+  // send 단계 전용 에러 — 이메일 중복("이미 가입된 이메일") 등을 이메일 입력
+  // 필드 바로 아래 인라인 표시. verifyError는 인증번호 입력 영역(codeSent 후)
+  // 에서만 보이므로 분리해서 send 실패가 사용자에게 안 보이는 버그를 막는다.
+  const [sendError, setSendError] = useState("");
   const [sending, setSending] = useState(false);
   const [verifying, setVerifying] = useState(false);
 
@@ -60,6 +64,7 @@ export default function SignupScreen() {
     if (!isEmailValid || sending) return;
     Keyboard.dismiss();
     setSending(true);
+    setSendError("");
     setVerifyError("");
     try {
       await sendEmailCode(email.trim());
@@ -67,9 +72,10 @@ export default function SignupScreen() {
       setVerifyCode("");
       showToast("인증번호를 전송했어요");
     } catch (e) {
-      // 백엔드가 "이미 가입된 이메일" 같은 친화 메시지를 message 필드에 실어
-      // 보내므로 그대로 노출. 없으면 일반 폴백.
-      setVerifyError(
+      // 백엔드가 "이미 가입된 이메일입니다." 같은 친화 메시지를 message
+      // 필드에 실어 보내므로 그대로 노출 (없으면 일반 폴백). 이메일 입력
+      // 필드 아래에 인라인 표시 — codeSent는 false 유지라 다음 단계 진입 X.
+      setSendError(
         getErrorMessage(e, "인증번호 전송에 실패했어요. 잠시 후 다시 시도해주세요"),
       );
     } finally {
@@ -155,6 +161,9 @@ export default function SignupScreen() {
                   value={email}
                   onChangeText={(v) => {
                     setEmail(v);
+                    // 이메일 수정 시 send 에러 클리어 — 다른 이메일로 재시도
+                    // 직전까지 옛 에러("이미 가입된 이메일")가 따라오면 혼란.
+                    if (sendError) setSendError("");
                     // Editing the email after sending invalidates the code.
                     if (codeSent) {
                       setCodeSent(false);
@@ -182,6 +191,12 @@ export default function SignupScreen() {
                 <Text style={styles.fieldError}>
                   올바른 이메일 형식을 입력하세요
                 </Text>
+              )}
+              {/* send 단계 에러("이미 가입된 이메일입니다." 등) — 형식 에러는
+                  isEmailValid가 false라 가드로 우선순위 분리, 둘이 동시에
+                  보이지 않음. */}
+              {isEmailValid && sendError !== "" && (
+                <Text style={styles.fieldError}>{sendError}</Text>
               )}
             </View>
 

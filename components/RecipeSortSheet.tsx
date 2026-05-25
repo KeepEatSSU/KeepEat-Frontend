@@ -5,22 +5,25 @@
  * 시트 닫음. 정렬 자체는 부모의 useMemo 파이프라인이 담당, 이 컴포넌트는
  * 선택값 전달만.
  *
- * RecipeFilterSheet과 같은 split-animation 패턴(backdrop 페이드 + sheet
- * 슬라이드 분리)으로 검정 배경이 함께 올라오는 글리치를 피한다.
+ * 파일럿(reanimated + gesture-handler 전환): 기존 RN Animated + PanResponder
+ * 조합은 useNativeDriver:true에서 JS setValue가 native에 안 닿아 핸들바
+ * 드래그가 안 됐다. 여기는 `useSheetGesture` hook으로 애니메이션·제스처를
+ * UI thread에서 일관 처리. 나머지 3개 시트는 검증 후 같은 패턴 복제 예정.
+ *
+ * Modal 내부에서 제스처가 동작하려면 GestureHandlerRootView를 Modal 안에
+ * 다시 wrap해야 한다 — root의 RootView는 별도 native window인 Modal 안에
+ * 닿지 않음.
  */
 
-import { useEffect, useRef } from "react";
-import {
-  Animated,
-  Dimensions,
-  Modal,
-  Pressable,
-  StyleSheet,
-  Text,
-  View,
-} from "react-native";
+import { Modal, Pressable, StyleSheet, Text, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { Ionicons } from "@expo/vector-icons";
+import {
+  GestureDetector,
+  GestureHandlerRootView,
+} from "react-native-gesture-handler";
+import Animated from "react-native-reanimated";
+import { useSheetGesture } from "@/hooks/useSheetGesture";
 import {
   Colors,
   FontSize,
@@ -38,8 +41,6 @@ const OPTIONS: { key: RecipeSortKey; label: string }[] = [
   { key: "mostDisliked", label: "싫어요 많은순" },
 ];
 
-const SLIDE_DISTANCE = Dimensions.get("window").height;
-
 interface Props {
   visible: boolean;
   value: RecipeSortKey;
@@ -49,47 +50,14 @@ interface Props {
 
 export function RecipeSortSheet({ visible, value, onChange, onClose }: Props) {
   const insets = useSafeAreaInsets();
-  const backdropOpacity = useRef(new Animated.Value(0)).current;
-  const sheetTranslateY = useRef(new Animated.Value(SLIDE_DISTANCE)).current;
-
-  useEffect(() => {
-    if (visible) {
-      backdropOpacity.setValue(0);
-      sheetTranslateY.setValue(SLIDE_DISTANCE);
-      Animated.parallel([
-        Animated.timing(backdropOpacity, {
-          toValue: 1,
-          duration: 200,
-          useNativeDriver: true,
-        }),
-        Animated.spring(sheetTranslateY, {
-          toValue: 0,
-          damping: 22,
-          stiffness: 220,
-          useNativeDriver: true,
-        }),
-      ]).start();
-    }
-  }, [visible, backdropOpacity, sheetTranslateY]);
-
-  const handleClose = () => {
-    Animated.parallel([
-      Animated.timing(backdropOpacity, {
-        toValue: 0,
-        duration: 180,
-        useNativeDriver: true,
-      }),
-      Animated.timing(sheetTranslateY, {
-        toValue: SLIDE_DISTANCE,
-        duration: 220,
-        useNativeDriver: true,
-      }),
-    ]).start(() => onClose());
-  };
+  const { pan, sheetStyle, backdropStyle, close } = useSheetGesture(
+    visible,
+    onClose,
+  );
 
   const handleSelect = (key: RecipeSortKey) => {
     onChange(key);
-    handleClose();
+    close();
   };
 
   return (
@@ -98,62 +66,73 @@ export function RecipeSortSheet({ visible, value, onChange, onClose }: Props) {
       transparent
       animationType="none"
       statusBarTranslucent
-      onRequestClose={handleClose}
+      onRequestClose={close}
     >
-      <View style={styles.container}>
-        <Animated.View
-          style={[styles.backdrop, { opacity: backdropOpacity }]}
-          pointerEvents={visible ? "auto" : "none"}
-        >
-          <Pressable style={StyleSheet.absoluteFill} onPress={handleClose} />
-        </Animated.View>
+      {/* Modal 내부 제스처용 root — Modal이 별도 native window라 앱 루트의
+          GestureHandlerRootView가 닿지 않음. */}
+      <GestureHandlerRootView style={styles.root}>
+        <View style={styles.container}>
+          <Animated.View
+            style={[styles.backdrop, backdropStyle]}
+            pointerEvents={visible ? "auto" : "none"}
+          >
+            <Pressable style={StyleSheet.absoluteFill} onPress={close} />
+          </Animated.View>
 
-        <Animated.View
-          style={[
-            styles.sheet,
-            { paddingBottom: Math.max(insets.bottom, 20) },
-            { transform: [{ translateY: sheetTranslateY }] },
-          ]}
-        >
-          <View style={styles.handleBar} />
-          <Text style={styles.title}>정렬</Text>
-          {OPTIONS.map((opt) => {
-            const isActive = opt.key === value;
-            return (
-              <Pressable
-                key={opt.key}
-                onPress={() => handleSelect(opt.key)}
-                style={({ pressed }) => [
-                  styles.option,
-                  isActive && styles.optionActive,
-                  pressed && { opacity: 0.7 },
-                ]}
-              >
-                <Text
-                  style={[
-                    styles.optionLabel,
-                    isActive && styles.optionLabelActive,
+          <Animated.View
+            style={[
+              styles.sheet,
+              { paddingBottom: Math.max(insets.bottom, 20) },
+              sheetStyle,
+            ]}
+          >
+            <GestureDetector gesture={pan}>
+              <View style={styles.handleZone}>
+                <View style={styles.handleBar} />
+              </View>
+            </GestureDetector>
+            <Text style={styles.title}>정렬</Text>
+            {OPTIONS.map((opt) => {
+              const isActive = opt.key === value;
+              return (
+                <Pressable
+                  key={opt.key}
+                  onPress={() => handleSelect(opt.key)}
+                  style={({ pressed }) => [
+                    styles.option,
+                    isActive && styles.optionActive,
+                    pressed && { opacity: 0.7 },
                   ]}
                 >
-                  {opt.label}
-                </Text>
-                {isActive && (
-                  <Ionicons
-                    name="checkmark"
-                    size={20}
-                    color={Colors.primary}
-                  />
-                )}
-              </Pressable>
-            );
-          })}
-        </Animated.View>
-      </View>
+                  <Text
+                    style={[
+                      styles.optionLabel,
+                      isActive && styles.optionLabelActive,
+                    ]}
+                  >
+                    {opt.label}
+                  </Text>
+                  {isActive && (
+                    <Ionicons
+                      name="checkmark"
+                      size={20}
+                      color={Colors.primary}
+                    />
+                  )}
+                </Pressable>
+              );
+            })}
+          </Animated.View>
+        </View>
+      </GestureHandlerRootView>
     </Modal>
   );
 }
 
 const styles = StyleSheet.create({
+  root: {
+    flex: 1,
+  },
   container: {
     flex: 1,
     justifyContent: "flex-end",
@@ -170,13 +149,19 @@ const styles = StyleSheet.create({
     paddingTop: Spacing.md,
     ...Shadows.ambient,
   },
+  // 드래그 hit zone — 작은 4px 바만으론 잡기 어려우니 시트 최상단 전체
+  // 폭에 두툼한 padding으로 영역을 키운다. 시각은 동일(센터의 작은 바만 보임).
+  handleZone: {
+    alignItems: "center",
+    paddingTop: Spacing.sm,
+    paddingBottom: Spacing.lg,
+    paddingHorizontal: Spacing.xl,
+  },
   handleBar: {
-    alignSelf: "center",
     width: 36,
     height: 4,
     borderRadius: Radius.full,
     backgroundColor: Colors.surfaceContainerHighest,
-    marginBottom: Spacing.lg,
   },
   title: {
     fontSize: FontSize.titleLg,

@@ -1,6 +1,7 @@
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import {
   ActivityIndicator,
+  BackHandler,
   Keyboard,
   KeyboardAvoidingView,
   Platform,
@@ -17,6 +18,7 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { Ionicons } from "@expo/vector-icons";
 import { useToast } from "@/components/Toast";
 import { useAuth } from "@/context/AuthContext";
+import { ConfirmModal } from "@/components/ConfirmModal";
 import { getErrorMessage } from "@/services/api";
 import {
   Colors,
@@ -55,18 +57,45 @@ export default function SignupProfileScreen() {
   // surface (returnKeyType + onSubmitEditing). DO NOT replicate the broken
   // signup.tsx step-2 setup (blurOnSubmit={false}, step branching, etc).
   const passwordRef = useRef<TextInput>(null);
+  const passwordConfirmRef = useRef<TextInput>(null);
 
   const [nickname, setNickname] = useState("");
   const [password, setPassword] = useState("");
+  const [passwordConfirm, setPasswordConfirm] = useState("");
   const [showPassword, setShowPassword] = useState(false);
+  const [showPasswordConfirm, setShowPasswordConfirm] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [submitError, setSubmitError] = useState("");
+  // 가입 그만두기 확인 팝업 — 헤더 ← 와 안드 하드웨어 뒤로가기 양쪽에서
+  // 띄움. 확인 시 router.replace("/login")으로 스택 깔끔 정리.
+  const [leaveModalVisible, setLeaveModalVisible] = useState(false);
 
   const isPwLengthOk = PW_LENGTH_REGEX.test(password);
   const isPwComplexOk = PW_COMPLEXITY_REGEX.test(password);
+  const isPwMatch =
+    passwordConfirm.length > 0 && password === passwordConfirm;
+  const showPwMismatch =
+    passwordConfirm.length > 0 && password !== passwordConfirm;
   const isNicknameValid = nickname.trim().length > 0;
   const canSubmit =
-    isNicknameValid && isPwLengthOk && isPwComplexOk && !submitting;
+    isNicknameValid && isPwLengthOk && isPwComplexOk && isPwMatch && !submitting;
+
+  // 안드 하드웨어 뒤로가기 가로채기 — 헤더 ←와 동일하게 leave 모달로 라우팅.
+  // 모달이 열려있을 땐 가로채지 않아 모달 자체의 onRequestClose 기본 동작
+  // (모달 닫기)이 우선되도록 한다.
+  useEffect(() => {
+    const sub = BackHandler.addEventListener("hardwareBackPress", () => {
+      if (leaveModalVisible) return false;
+      setLeaveModalVisible(true);
+      return true;
+    });
+    return () => sub.remove();
+  }, [leaveModalVisible]);
+
+  const handleLeaveConfirm = () => {
+    setLeaveModalVisible(false);
+    router.replace("/login");
+  };
 
   const handleSignup = async () => {
     if (!canSubmit) return;
@@ -98,14 +127,21 @@ export default function SignupProfileScreen() {
         behavior={Platform.OS === "ios" ? "padding" : "height"}
       >
         <ScrollView
+          style={styles.scroll}
           contentContainerStyle={styles.scrollContent}
           showsVerticalScrollIndicator={false}
           keyboardShouldPersistTaps="handled"
+          // iOS: 포커스된 TextInput이 키보드에 가리지 않도록 ScrollView가
+          // contentInset을 자동 조정 (RN 0.73+, Android 무시).
+          automaticallyAdjustKeyboardInsets
+          // 스크롤 시작하면 키보드 dismiss — 입력 후 자연스럽게 닫힘.
+          keyboardDismissMode="on-drag"
         >
           {/* Header */}
           <View style={styles.headerRow}>
             <Pressable
-              onPress={() => router.back()}
+              onPress={() => setLeaveModalVisible(true)}
+              accessibilityLabel="가입 그만두기"
               style={({ pressed }) => [
                 styles.backBtn,
                 pressed && { opacity: 0.6 },
@@ -186,8 +222,8 @@ export default function SignupProfileScreen() {
                   placeholderTextColor={Colors.outline}
                   style={styles.input}
                   secureTextEntry={!showPassword}
-                  returnKeyType="done"
-                  onSubmitEditing={handleSignup}
+                  returnKeyType="next"
+                  onSubmitEditing={() => passwordConfirmRef.current?.focus()}
                 />
                 <Pressable onPress={() => setShowPassword((v) => !v)}>
                   <Ionicons
@@ -235,6 +271,46 @@ export default function SignupProfileScreen() {
               </View>
             </View>
 
+            {/* Password confirm */}
+            <View style={styles.inputWrap}>
+              <Text style={styles.inputLabel}>비밀번호 확인</Text>
+              <View style={styles.inputRow}>
+                <Ionicons
+                  name="lock-closed-outline"
+                  size={18}
+                  color={Colors.outline}
+                  style={{ marginRight: Spacing.sm }}
+                />
+                <TextInput
+                  ref={passwordConfirmRef}
+                  value={passwordConfirm}
+                  onChangeText={setPasswordConfirm}
+                  placeholder="비밀번호 다시 입력"
+                  placeholderTextColor={Colors.outline}
+                  style={styles.input}
+                  secureTextEntry={!showPasswordConfirm}
+                  returnKeyType="done"
+                  onSubmitEditing={handleSignup}
+                />
+                <Pressable
+                  onPress={() => setShowPasswordConfirm((v) => !v)}
+                >
+                  <Ionicons
+                    name={
+                      showPasswordConfirm ? "eye-off-outline" : "eye-outline"
+                    }
+                    size={18}
+                    color={Colors.outline}
+                  />
+                </Pressable>
+              </View>
+              {showPwMismatch && (
+                <Text style={styles.fieldError}>
+                  비밀번호가 일치하지 않아요
+                </Text>
+              )}
+            </View>
+
             {submitError !== "" && (
               <View style={styles.submitErrorRow}>
                 <Ionicons
@@ -275,6 +351,16 @@ export default function SignupProfileScreen() {
             </Pressable>
           </View>
         </ScrollView>
+        <ConfirmModal
+          visible={leaveModalVisible}
+          title="가입을 그만두시겠어요?"
+          subtitle={"입력하신 정보가 모두 사라져요"}
+          confirmLabel="그만두기"
+          cancelLabel="계속하기"
+          destructive
+          onConfirm={handleLeaveConfirm}
+          onCancel={() => setLeaveModalVisible(false)}
+        />
       </KeyboardAvoidingView>
     </TouchableWithoutFeedback>
   );
@@ -286,6 +372,11 @@ const styles = StyleSheet.create({
   screen: {
     flex: 1,
     backgroundColor: Colors.surface,
+  },
+  // KAV가 키보드 시 자기 영역을 줄일 때 ScrollView가 그 줄어든 공간을
+  // flex:1로 정확히 채우도록 명시 — 콘텐츠 스크롤이 보장됨.
+  scroll: {
+    flex: 1,
   },
   scrollContent: {
     paddingHorizontal: Spacing.xl,
@@ -384,6 +475,15 @@ const styles = StyleSheet.create({
   checkTextPass: {
     color: Colors.primary,
     fontWeight: FontWeight.semiBold,
+  },
+
+  // Inline field error (비밀번호 불일치 등) — submitErrorRow와 톤 분리
+  // (필드 단위 안내라 아이콘 없이 텍스트만, signup.tsx의 fieldError와 동일).
+  fieldError: {
+    fontSize: FontSize.bodySm,
+    fontWeight: FontWeight.medium,
+    color: Colors.error,
+    marginTop: Spacing.xs,
   },
 
   // Submit error

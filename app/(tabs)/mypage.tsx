@@ -77,10 +77,14 @@ export default function MyPageScreen() {
   // Backend mixes casing ("LOCAL" / "google") — normalize for comparison.
   const isGoogleAccount = (user?.provider ?? "").toLowerCase() === "google";
 
-  // No `nickname` field on UserInfo yet — derive a display name from the
-  // email local-part as a friendly fallback.
+  // 표시명 폴백 체인:
+  //   1. 서버 nickname (LOCAL 가입자는 signup-profile에서 입력값, 구글은
+  //      백엔드 설정에 따라 displayName 또는 null)
+  //   2. 이메일 local-part (구글 등 nickname이 null/공백인 경우)
+  //   3. 이메일 전체 (드물게 "@" 없는 비표준 입력)
   const email = user?.email ?? "";
-  const displayName = email.includes("@") ? email.split("@")[0] : email;
+  const emailLocalPart = email.includes("@") ? email.split("@")[0] : email;
+  const displayName = user?.nickname?.trim() || emailLocalPart;
 
   const handleTogglePush = async () => {
     if (toggling) return;

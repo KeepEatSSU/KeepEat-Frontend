@@ -19,6 +19,7 @@ import {
   KeyboardAvoidingView,
   Platform,
 } from "react-native";
+import { Ionicons } from "@expo/vector-icons";
 import {
   Colors,
   Spacing,
@@ -42,10 +43,15 @@ export function DeletePasswordModal({
   onCancel,
 }: DeletePasswordModalProps) {
   const [password, setPassword] = useState("");
+  const [showPassword, setShowPassword] = useState(false);
 
   // 매번 열릴 때 비번 필드를 비움 — 이전 시도 값이 남지 않도록.
+  // showPassword도 함께 false로 — 다음 오픈 시 기본 숨김 상태로 복귀.
   useEffect(() => {
-    if (visible) setPassword("");
+    if (visible) {
+      setPassword("");
+      setShowPassword(false);
+    }
   }, [visible]);
 
   const canSubmit = password.length > 0 && !submitting;
@@ -69,17 +75,32 @@ export function DeletePasswordModal({
             비밀번호를 입력하면 모든 데이터가 삭제돼요.
           </Text>
 
-          <TextInput
-            value={password}
-            onChangeText={setPassword}
-            placeholder="비밀번호"
-            placeholderTextColor={Colors.outline}
-            secureTextEntry
-            autoCapitalize="none"
-            autoCorrect={false}
-            editable={!submitting}
-            style={styles.input}
-          />
+          <View style={styles.inputRow}>
+            <TextInput
+              value={password}
+              onChangeText={setPassword}
+              placeholder="비밀번호"
+              placeholderTextColor={Colors.outline}
+              secureTextEntry={!showPassword}
+              autoCapitalize="none"
+              autoCorrect={false}
+              editable={!submitting}
+              style={styles.input}
+            />
+            <Pressable
+              onPress={() => setShowPassword((v) => !v)}
+              hitSlop={8}
+              accessibilityLabel={
+                showPassword ? "비밀번호 숨기기" : "비밀번호 보기"
+              }
+            >
+              <Ionicons
+                name={showPassword ? "eye-off-outline" : "eye-outline"}
+                size={18}
+                color={Colors.outline}
+              />
+            </Pressable>
+          </View>
 
           <View style={styles.buttonRow}>
             <Pressable
@@ -150,14 +171,23 @@ const styles = StyleSheet.create({
     lineHeight: 22,
     marginBottom: Spacing.lg,
   },
-  input: {
+  // 컨테이너 — 기존 input 스타일의 시각 속성(background/border/padding)을
+  // 옮겨와 TextInput 옆에 눈 토글 Pressable이 들어갈 자리를 확보.
+  inputRow: {
+    flexDirection: "row",
+    alignItems: "center",
     backgroundColor: Colors.fieldBackground,
     borderRadius: Radius.lg,
     paddingHorizontal: Spacing.base,
     paddingVertical: Spacing.md,
+    marginBottom: Spacing.xl,
+  },
+  input: {
+    flex: 1,
     fontSize: FontSize.bodyMd,
     color: Colors.onSurface,
-    marginBottom: Spacing.xl,
+    padding: 0,
+    margin: 0,
   },
   buttonRow: {
     flexDirection: "row",

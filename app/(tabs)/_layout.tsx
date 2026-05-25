@@ -1,20 +1,20 @@
-import { useState } from "react";
-import { View, Text, Pressable, Alert, Platform, StyleSheet } from "react-native";
-import { Tabs, useRouter } from "expo-router";
-import { Ionicons } from "@expo/vector-icons";
-import { useSafeAreaInsets } from "react-native-safe-area-context";
-import type { BottomTabBarProps } from "@react-navigation/bottom-tabs";
-import * as ImagePicker from "expo-image-picker";
-import { LinearGradient } from "expo-linear-gradient";
 import { AddMenuSheet } from "@/components/AddMenuSheet";
 import {
   Colors,
-  Shadows,
-  Radius,
-  Spacing,
   FontSize,
   FontWeight,
+  Radius,
+  Shadows,
+  Spacing,
 } from "@/constants/theme";
+import { Ionicons } from "@expo/vector-icons";
+import type { BottomTabBarProps } from "@react-navigation/bottom-tabs";
+import * as ImagePicker from "expo-image-picker";
+import { LinearGradient } from "expo-linear-gradient";
+import { Tabs, useRouter } from "expo-router";
+import { useState } from "react";
+import { Alert, Platform, Pressable, StyleSheet, Text, View } from "react-native";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 // ─── Custom Floating Tab Bar ──────────────────────────────────────────────────
 
@@ -52,7 +52,7 @@ function FloatingTabBar({
     <View style={styles.tabBarWrapper} pointerEvents="box-none">
       <LinearGradient
         colors={[
-          "rgba(255, 255, 255, 0.4)",
+          "rgba(255, 255, 255, 0.8)",
           "rgba(255, 255, 255, 0.9)",
           "rgba(255, 255, 255, 1)",
         ]}

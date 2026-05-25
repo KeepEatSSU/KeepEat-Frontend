@@ -875,7 +875,10 @@ const styles = StyleSheet.create({
   // Scroll
   scrollContent: {
     paddingHorizontal: Spacing.xl,
-    paddingBottom: 100,
+    // bottomCta는 sibling이라 가림 보호 불필요. 마지막 step과 CTA 영역
+    // 사이의 자연스러운 끝 여백만 남긴다 (이전 100은 과해서 짧은 레시피에선
+    // 큰 빈 공간으로 보였음).
+    paddingBottom: Spacing.lg,
   },
 
   // Hero

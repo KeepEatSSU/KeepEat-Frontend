@@ -5,12 +5,13 @@
  * "적용하기" 누르면 onApply로 부모에 전달 — 미적용 변경은 취소/백드롭/뒤로
  * 어느 경로로 닫혀도 폐기 (시트가 열릴 때마다 value로 다시 동기화).
  *
- * 단일 선택만 다루므로 RecipeFilterSheet보다 단순하지만, Modal +
- * Animated backdrop/transform + 초기화/취소/적용하기 3-buttons 패턴은
- * 동일하게 가져가 두 시트가 같은 idiom으로 보이게 한다.
+ * 애니메이션·제스처 레이어는 useSheetGesture(reanimated + gesture-handler)
+ * 로 통일 — useNativeDriver 한계로 핸들바 드래그가 안 되던 문제 해결.
+ * RN Modal은 별도 native window라 Modal 내부를 다시 GestureHandlerRootView로
+ * wrap해야 제스처가 작동.
  */
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useState } from "react";
 import {
   Modal,
   View,
@@ -18,11 +19,15 @@ import {
   Pressable,
   ScrollView,
   StyleSheet,
-  Animated,
-  Dimensions,
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
+import {
+  GestureDetector,
+  GestureHandlerRootView,
+} from "react-native-gesture-handler";
+import Animated from "react-native-reanimated";
 import { CATEGORIES } from "@/constants/ingredients-master";
+import { useSheetGesture } from "@/hooks/useSheetGesture";
 import {
   Colors,
   FontSize,
@@ -44,8 +49,6 @@ interface Props {
   onClose: () => void;
 }
 
-const SLIDE_DISTANCE = Dimensions.get("window").height;
-
 export function FridgeCategorySheet({
   visible,
   value,
@@ -55,9 +58,10 @@ export function FridgeCategorySheet({
 }: Props) {
   const insets = useSafeAreaInsets();
   const [draft, setDraft] = useState<string[]>(value);
-
-  const backdropOpacity = useRef(new Animated.Value(0)).current;
-  const sheetTranslateY = useRef(new Animated.Value(SLIDE_DISTANCE)).current;
+  const { pan, sheetStyle, backdropStyle, close } = useSheetGesture(
+    visible,
+    onClose,
+  );
 
   // 시트가 열릴 때마다 부모의 적용된 값으로 draft를 재시드 — 취소 후 재오픈
   // 시 stale local 편집이 남지 않도록.
@@ -65,48 +69,11 @@ export function FridgeCategorySheet({
     if (visible) setDraft(value);
   }, [visible, value]);
 
-  useEffect(() => {
-    if (visible) {
-      backdropOpacity.setValue(0);
-      sheetTranslateY.setValue(SLIDE_DISTANCE);
-      Animated.parallel([
-        Animated.timing(backdropOpacity, {
-          toValue: 1,
-          duration: 200,
-          useNativeDriver: true,
-        }),
-        Animated.spring(sheetTranslateY, {
-          toValue: 0,
-          damping: 22,
-          stiffness: 220,
-          useNativeDriver: true,
-        }),
-      ]).start();
-    }
-  }, [visible, backdropOpacity, sheetTranslateY]);
-
-  // 모든 닫기 경로(취소/적용/백드롭/안드 뒤로)가 이 함수를 거치게 해서
-  // 백드롭이 시트보다 먼저 사라지는 시각적 글리치를 막는다.
-  const handleClose = () => {
-    Animated.parallel([
-      Animated.timing(backdropOpacity, {
-        toValue: 0,
-        duration: 180,
-        useNativeDriver: true,
-      }),
-      Animated.timing(sheetTranslateY, {
-        toValue: SLIDE_DISTANCE,
-        duration: 220,
-        useNativeDriver: true,
-      }),
-    ]).start(() => onClose());
-  };
-
   const reset = () => setDraft([]);
 
   const apply = () => {
     onApply(draft);
-    handleClose();
+    close();
   };
 
   return (
@@ -115,95 +82,100 @@ export function FridgeCategorySheet({
       transparent
       animationType="none"
       statusBarTranslucent
-      onRequestClose={handleClose}
+      onRequestClose={close}
     >
-      <View style={styles.container}>
-        <Animated.View
-          style={[styles.backdrop, { opacity: backdropOpacity }]}
-          pointerEvents={visible ? "auto" : "none"}
-        >
-          <Pressable
-            style={StyleSheet.absoluteFill}
-            onPress={handleClose}
-          />
-        </Animated.View>
-        <Animated.View
-          style={[
-            styles.sheet,
-            { paddingBottom: Math.max(insets.bottom, 16) },
-            { transform: [{ translateY: sheetTranslateY }] },
-          ]}
-        >
-          <View style={styles.handleBar} />
-
-          <View style={styles.titleRow}>
-            <Text style={styles.title}>카테고리 필터</Text>
-            <Pressable
-              onPress={reset}
-              hitSlop={8}
-              style={({ pressed }) => pressed && { opacity: 0.6 }}
-            >
-              <Text style={styles.resetText}>초기화</Text>
-            </Pressable>
-          </View>
-
-          <ScrollView
-            style={styles.body}
-            showsVerticalScrollIndicator={false}
-            contentContainerStyle={{ paddingBottom: Spacing.xl }}
+      {/* Modal 내부 제스처용 root — Modal이 별도 native window라 앱 루트의
+          GestureHandlerRootView가 닿지 않음. */}
+      <GestureHandlerRootView style={styles.root}>
+        <View style={styles.container}>
+          <Animated.View
+            style={[styles.backdrop, backdropStyle]}
+            pointerEvents={visible ? "auto" : "none"}
           >
-            <Text style={styles.sectionLabel}>카테고리</Text>
-            <View style={styles.chipsWrap}>
-              <Chip
-                label="전체"
-                active={draft.length === 0}
-                onPress={() => setDraft([])}
-              />
-              {CATEGORIES.map((c) => {
-                const count = counts[c.name] ?? 0;
-                const isActive = draft.includes(c.name);
-                return (
-                  <Chip
-                    key={c.id}
-                    label={c.name}
-                    count={count}
-                    active={isActive}
-                    disabled={count === 0}
-                    onPress={() =>
-                      setDraft((prev) =>
-                        prev.includes(c.name)
-                          ? prev.filter((x) => x !== c.name)
-                          : [...prev, c.name],
-                      )
-                    }
-                  />
-                );
-              })}
-            </View>
-          </ScrollView>
+            <Pressable style={StyleSheet.absoluteFill} onPress={close} />
+          </Animated.View>
+          <Animated.View
+            style={[
+              styles.sheet,
+              { paddingBottom: Math.max(insets.bottom, 16) },
+              sheetStyle,
+            ]}
+          >
+            <GestureDetector gesture={pan}>
+              <View style={styles.handleZone}>
+                <View style={styles.handleBar} />
+              </View>
+            </GestureDetector>
 
-          <View style={styles.applyRow}>
-            <Pressable
-              onPress={handleClose}
-              style={({ pressed }) => [
-                styles.cancelBtn,
-                pressed && { opacity: 0.7 },
-              ]}
+            <View style={styles.titleRow}>
+              <Text style={styles.title}>카테고리 필터</Text>
+              <Pressable
+                onPress={reset}
+                hitSlop={8}
+                style={({ pressed }) => pressed && { opacity: 0.6 }}
+              >
+                <Text style={styles.resetText}>초기화</Text>
+              </Pressable>
+            </View>
+
+            <ScrollView
+              style={styles.body}
+              showsVerticalScrollIndicator={false}
+              contentContainerStyle={{ paddingBottom: Spacing.xl }}
             >
-              <Text style={styles.cancelText}>취소</Text>
-            </Pressable>
-            <Pressable
-              onPress={apply}
-              style={({ pressed }) => [
-                styles.applyBtn,
-                pressed && { opacity: 0.85, transform: [{ scale: 0.98 }] },
-              ]}
-            >
-              <Text style={styles.applyText}>적용하기</Text>
-            </Pressable>
-          </View>
-        </Animated.View>
-      </View>
+              <Text style={styles.sectionLabel}>카테고리</Text>
+              <View style={styles.chipsWrap}>
+                <Chip
+                  label="전체"
+                  active={draft.length === 0}
+                  onPress={() => setDraft([])}
+                />
+                {CATEGORIES.map((c) => {
+                  const count = counts[c.name] ?? 0;
+                  const isActive = draft.includes(c.name);
+                  return (
+                    <Chip
+                      key={c.id}
+                      label={c.name}
+                      count={count}
+                      active={isActive}
+                      disabled={count === 0}
+                      onPress={() =>
+                        setDraft((prev) =>
+                          prev.includes(c.name)
+                            ? prev.filter((x) => x !== c.name)
+                            : [...prev, c.name],
+                        )
+                      }
+                    />
+                  );
+                })}
+              </View>
+            </ScrollView>
+
+            <View style={styles.applyRow}>
+              <Pressable
+                onPress={close}
+                style={({ pressed }) => [
+                  styles.cancelBtn,
+                  pressed && { opacity: 0.7 },
+                ]}
+              >
+                <Text style={styles.cancelText}>취소</Text>
+              </Pressable>
+              <Pressable
+                onPress={apply}
+                style={({ pressed }) => [
+                  styles.applyBtn,
+                  pressed && { opacity: 0.85, transform: [{ scale: 0.98 }] },
+                ]}
+              >
+                <Text style={styles.applyText}>적용하기</Text>
+              </Pressable>
+            </View>
+          </Animated.View>
+        </View>
+      </GestureHandlerRootView>
     </Modal>
   );
 }
@@ -258,6 +230,9 @@ function Chip({
 }
 
 const styles = StyleSheet.create({
+  root: {
+    flex: 1,
+  },
   container: {
     flex: 1,
     justifyContent: "flex-end",
@@ -274,13 +249,19 @@ const styles = StyleSheet.create({
     maxHeight: "85%",
     ...Shadows.ambient,
   },
+  // 드래그 hit zone — 작은 4px 바만으론 잡기 어려우니 시트 최상단 전체
+  // 폭에 두툼한 padding으로 영역을 키운다. 시각은 동일(센터의 작은 바만 보임).
+  handleZone: {
+    alignItems: "center",
+    paddingTop: Spacing.sm,
+    paddingBottom: Spacing.base,
+    paddingHorizontal: Spacing.xl,
+  },
   handleBar: {
-    alignSelf: "center",
     width: 36,
     height: 4,
     borderRadius: Radius.full,
     backgroundColor: Colors.surfaceContainerHighest,
-    marginBottom: Spacing.base,
   },
   titleRow: {
     flexDirection: "row",

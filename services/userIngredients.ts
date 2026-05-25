@@ -220,6 +220,12 @@ export function mapIngredientFromApi(dto: UserIngredientResponse): Ingredient {
  */
 export function mapIngredientToCreateRequest(
   draft: IngredientDraft,
+  /**
+   * 화면 단위 구매일 — add-confirm은 사용자가 직접 고른 값을 넘긴다.
+   * 미전달 시 today. expirationDate 폴백의 anchor로도 쓰여 두 값이 항상
+   * 같은 기준에서 계산되도록 한다.
+   */
+  purchaseDate?: Date,
 ): UserIngredientCreateRequest {
   if (draft.storage == null) {
     throw new Error(
@@ -234,14 +240,23 @@ export function mapIngredientToCreateRequest(
     );
   }
 
+  const purchase = purchaseDate ?? new Date();
   const req: UserIngredientCreateRequest = {
     ingredientId: isCustomItem ? null : (draft.ingredientId as number),
     storageType: mapStorageTypeToApi(draft.storage),
-    // Drafts don't track purchase date; default to today.
-    purchaseDate: toIsoDate(new Date()),
+    purchaseDate: toIsoDate(purchase),
   };
 
-  if (draft.expirationDate) req.expiryDate = toIsoDate(draft.expirationDate);
+  if (draft.expirationDate) {
+    req.expiryDate = toIsoDate(draft.expirationDate);
+  } else {
+    // 안전망: 커스텀 재료(보관별 자동계산 없음)나 OCR 누락 경로 등 어떤
+    // 이유로든 expirationDate가 비어있으면 purchaseDate + 7일로 폴백.
+    // 사용자가 직접 입력한 경우엔 위 if 가지로 들어가 폴백 안 탐.
+    const fallback = new Date(purchase);
+    fallback.setDate(fallback.getDate() + 7);
+    req.expiryDate = toIsoDate(fallback);
+  }
   if (draft.quantity != null) req.quantity = draft.quantity;
   if (draft.unit) req.unit = draft.unit;
 

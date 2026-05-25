@@ -6,21 +6,14 @@
  * 전달. "초기화"는 모두 기본값으로 되돌림. 시트 외부의 부모는 적용된
  * 시점의 값만 반영하므로, 시트 열고 닫으면 미적용 변경은 폐기됨 (시트가
  * 열릴 때마다 부모 value로 다시 동기화).
+ *
+ * 애니메이션·제스처 레이어는 useSheetGesture(reanimated + gesture-handler)
+ * 로 통일 — useNativeDriver 한계로 핸들바 드래그가 안 되던 문제 해결.
+ * RN Modal은 별도 native window라 Modal 내부를 다시 GestureHandlerRootView로
+ * wrap해야 제스처가 작동.
  */
 
-import { useEffect, useMemo, useRef, useState } from "react";
-import {
-  Modal,
-  View,
-  Text,
-  Pressable,
-  ScrollView,
-  StyleSheet,
-  Animated,
-  Dimensions,
-} from "react-native";
-import { useSafeAreaInsets } from "react-native-safe-area-context";
-import Slider from "@react-native-community/slider";
+import type { ReactionType } from "@/constants/domain";
 import {
   Colors,
   FontSize,
@@ -30,7 +23,23 @@ import {
   Shadows,
   Spacing,
 } from "@/constants/theme";
-import type { ReactionType } from "@/constants/domain";
+import { useSheetGesture } from "@/hooks/useSheetGesture";
+import Slider from "@react-native-community/slider";
+import { useEffect, useMemo, useState } from "react";
+import {
+  Modal,
+  Pressable,
+  ScrollView,
+  StyleSheet,
+  Text,
+  View,
+} from "react-native";
+import {
+  GestureDetector,
+  GestureHandlerRootView,
+} from "react-native-gesture-handler";
+import Animated from "react-native-reanimated";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 export type DifficultyKey = "상" | "중" | "하";
 
@@ -84,8 +93,8 @@ const DIFFICULTY_OPTIONS: { key: DifficultyKey; label: string }[] = [
 ];
 
 const REACTION_OPTIONS: { key: ReactionType; label: string }[] = [
-  { key: "LIKE", label: "좋아요한" },
-  { key: "DISLIKE", label: "싫어요한" },
+  { key: "LIKE", label: "좋아요" },
+  { key: "DISLIKE", label: "싫어요" },
 ];
 
 /** 결과 카운트 계산에 필요한 최소 필드. `RecipeListItem` /
@@ -110,11 +119,6 @@ interface Props {
   items?: FilterableRecipeItem[];
 }
 
-// Slide distance for the open/close transform. A screen-height upper bound
-// guarantees the sheet starts entirely off-screen regardless of how tall the
-// rendered content turns out to be.
-const SLIDE_DISTANCE = Dimensions.get("window").height;
-
 export function RecipeFilterSheet({
   visible,
   value,
@@ -125,60 +129,16 @@ export function RecipeFilterSheet({
   const insets = useSafeAreaInsets();
   // Local draft state — only commits to parent on "적용하기".
   const [draft, setDraft] = useState<RecipeFilters>(value);
-
-  // Separate backdrop opacity + sheet translateY animations. Modal itself
-  // uses animationType="none" so the system doesn't slide the whole tree
-  // (which would carry the dim backdrop up with the sheet — the visual
-  // glitch this refactor fixes).
-  const backdropOpacity = useRef(new Animated.Value(0)).current;
-  const sheetTranslateY = useRef(new Animated.Value(SLIDE_DISTANCE)).current;
+  const { pan, sheetStyle, backdropStyle, close } = useSheetGesture(
+    visible,
+    onClose,
+  );
 
   // Re-seed the draft every time the sheet opens so reopens after a cancel
   // start from the currently-applied filter set rather than stale local edits.
   useEffect(() => {
     if (visible) setDraft(value);
   }, [visible, value]);
-
-  // Drive the open animation on visible=true. Re-set initial values on each
-  // open so a second/third open animates from the bottom every time, not
-  // from wherever the previous close landed.
-  useEffect(() => {
-    if (visible) {
-      backdropOpacity.setValue(0);
-      sheetTranslateY.setValue(SLIDE_DISTANCE);
-      Animated.parallel([
-        Animated.timing(backdropOpacity, {
-          toValue: 1,
-          duration: 200,
-          useNativeDriver: true,
-        }),
-        Animated.spring(sheetTranslateY, {
-          toValue: 0,
-          damping: 22,
-          stiffness: 220,
-          useNativeDriver: true,
-        }),
-      ]).start();
-    }
-  }, [visible, backdropOpacity, sheetTranslateY]);
-
-  // Plays the close animation, then notifies the parent so it can flip
-  // `visible` to false. All exit paths (cancel, apply, backdrop tap, Android
-  // back) route through this so the dim never disappears instantly.
-  const handleClose = () => {
-    Animated.parallel([
-      Animated.timing(backdropOpacity, {
-        toValue: 0,
-        duration: 180,
-        useNativeDriver: true,
-      }),
-      Animated.timing(sheetTranslateY, {
-        toValue: SLIDE_DISTANCE,
-        duration: 220,
-        useNativeDriver: true,
-      }),
-    ]).start(() => onClose());
-  };
 
   const toggleMethod = (m: string) => {
     setDraft((prev) => {
@@ -206,7 +166,7 @@ export function RecipeFilterSheet({
   const reset = () => setDraft(EMPTY_FILTERS);
   const apply = () => {
     onApply(draft);
-    handleClose();
+    close();
   };
 
   const caloriesLabel =
@@ -243,149 +203,154 @@ export function RecipeFilterSheet({
       transparent
       animationType="none"
       statusBarTranslucent
-      onRequestClose={handleClose}
+      onRequestClose={close}
     >
-      <View style={styles.container}>
-        <Animated.View
-          style={[styles.backdrop, { opacity: backdropOpacity }]}
-          pointerEvents={visible ? "auto" : "none"}
-        >
-          <Pressable
-            style={StyleSheet.absoluteFill}
-            onPress={handleClose}
-          />
-        </Animated.View>
-        <Animated.View
-          style={[
-            styles.sheet,
-            { paddingBottom: Math.max(insets.bottom, 16) },
-            { transform: [{ translateY: sheetTranslateY }] },
-          ]}
-        >
-          <View style={styles.handleBar} />
-
-          <View style={styles.titleRow}>
-            <Text style={styles.title}>필터</Text>
-            <Pressable
-              onPress={reset}
-              hitSlop={8}
-              style={({ pressed }) => pressed && { opacity: 0.6 }}
-            >
-              <Text style={styles.resetText}>초기화</Text>
-            </Pressable>
-          </View>
-
-          <ScrollView
-            style={styles.body}
-            showsVerticalScrollIndicator={false}
-            contentContainerStyle={{ paddingBottom: Spacing.xl }}
+      {/* Modal 내부 제스처용 root — Modal이 별도 native window라 앱 루트의
+          GestureHandlerRootView가 닿지 않음. */}
+      <GestureHandlerRootView style={styles.root}>
+        <View style={styles.container}>
+          <Animated.View
+            style={[styles.backdrop, backdropStyle]}
+            pointerEvents={visible ? "auto" : "none"}
           >
-            {/* ── 조리법 (다중) ── */}
-            <Text style={styles.sectionLabel}>조리법</Text>
-            <View style={styles.chipsWrap}>
-              <Chip
-                label="전체"
-                active={draft.cookingMethods.length === 0}
-                onPress={() =>
-                  setDraft((prev) => ({ ...prev, cookingMethods: [] }))
-                }
-              />
-              {COOKING_METHODS.map((m) => (
-                <Chip
-                  key={m}
-                  label={m}
-                  active={draft.cookingMethods.includes(m)}
-                  onPress={() => toggleMethod(m)}
-                />
-              ))}
+            <Pressable style={StyleSheet.absoluteFill} onPress={close} />
+          </Animated.View>
+          <Animated.View
+            style={[
+              styles.sheet,
+              { paddingBottom: Math.max(insets.bottom, 16) },
+              sheetStyle,
+            ]}
+          >
+            <GestureDetector gesture={pan}>
+              <View style={styles.handleZone}>
+                <View style={styles.handleBar} />
+              </View>
+            </GestureDetector>
+
+            <View style={styles.titleRow}>
+              <Text style={styles.title}>필터</Text>
+              <Pressable
+                onPress={reset}
+                hitSlop={8}
+                style={({ pressed }) => pressed && { opacity: 0.6 }}
+              >
+                <Text style={styles.resetText}>초기화</Text>
+              </Pressable>
             </View>
 
-            {/* ── 난이도 (단일) ── */}
-            <Text style={[styles.sectionLabel, styles.sectionLabelSpaced]}>
-              난이도
-            </Text>
-            <View style={styles.chipsWrap}>
-              <Chip
-                label="전체"
-                active={draft.difficulty === null}
-                onPress={() => setDifficulty(null)}
-              />
-              {DIFFICULTY_OPTIONS.map((d) => (
+            <ScrollView
+              style={styles.body}
+              showsVerticalScrollIndicator={false}
+              contentContainerStyle={{ paddingBottom: Spacing.xl }}
+            >
+              {/* ── 조리법 (다중) ── */}
+              <Text style={styles.sectionLabel}>조리법</Text>
+              <View style={styles.chipsWrap}>
                 <Chip
-                  key={d.key}
-                  label={d.label}
-                  active={draft.difficulty === d.key}
-                  onPress={() => setDifficulty(d.key)}
+                  label="전체"
+                  active={draft.cookingMethods.length === 0}
+                  onPress={() =>
+                    setDraft((prev) => ({ ...prev, cookingMethods: [] }))
+                  }
                 />
-              ))}
-            </View>
+                {COOKING_METHODS.map((m) => (
+                  <Chip
+                    key={m}
+                    label={m}
+                    active={draft.cookingMethods.includes(m)}
+                    onPress={() => toggleMethod(m)}
+                  />
+                ))}
+              </View>
 
-            {/* ── 내 반응 (단일) ── */}
-            <Text style={[styles.sectionLabel, styles.sectionLabelSpaced]}>
-              내 반응
-            </Text>
-            <View style={styles.chipsWrap}>
-              <Chip
-                label="전체"
-                active={draft.myReaction === null}
-                onPress={() => setMyReaction(null)}
-              />
-              {REACTION_OPTIONS.map((r) => (
-                <Chip
-                  key={r.key}
-                  label={r.label}
-                  active={draft.myReaction === r.key}
-                  onPress={() => setMyReaction(r.key)}
-                />
-              ))}
-            </View>
-
-            {/* ── 칼로리 (슬라이더) ── */}
-            <View style={styles.caloriesHeader}>
+              {/* ── 난이도 (단일) ── */}
               <Text style={[styles.sectionLabel, styles.sectionLabelSpaced]}>
-                칼로리
+                난이도
               </Text>
-              <Text style={styles.caloriesValue}>{caloriesLabel}</Text>
-            </View>
-            <Slider
-              minimumValue={CAL_MIN}
-              maximumValue={CAL_MAX}
-              step={CAL_STEP}
-              value={draft.maxCalories}
-              minimumTrackTintColor={Colors.primary}
-              maximumTrackTintColor={Colors.surfaceContainerHigh}
-              thumbTintColor={Colors.primary}
-              onValueChange={setMaxCalories}
-            />
-          </ScrollView>
+              <View style={styles.chipsWrap}>
+                <Chip
+                  label="전체"
+                  active={draft.difficulty === null}
+                  onPress={() => setDifficulty(null)}
+                />
+                {DIFFICULTY_OPTIONS.map((d) => (
+                  <Chip
+                    key={d.key}
+                    label={d.label}
+                    active={draft.difficulty === d.key}
+                    onPress={() => setDifficulty(d.key)}
+                  />
+                ))}
+              </View>
 
-          {/* ── Apply row ── */}
-          <View style={styles.applyRow}>
-            <Pressable
-              onPress={handleClose}
-              style={({ pressed }) => [
-                styles.cancelBtn,
-                pressed && { opacity: 0.7 },
-              ]}
-            >
-              <Text style={styles.cancelText}>취소</Text>
-            </Pressable>
-            <Pressable
-              onPress={apply}
-              style={({ pressed }) => [
-                styles.applyBtn,
-                pressed && { opacity: 0.85, transform: [{ scale: 0.98 }] },
-              ]}
-            >
-              <Text style={styles.applyText}>
-                {matchCount !== null
-                  ? `적용하기 (${matchCount})`
-                  : "적용하기"}
+              {/* ── 내 반응 (단일) ── */}
+              <Text style={[styles.sectionLabel, styles.sectionLabelSpaced]}>
+                내 반응
               </Text>
-            </Pressable>
-          </View>
-        </Animated.View>
-      </View>
+              <View style={styles.chipsWrap}>
+                <Chip
+                  label="전체"
+                  active={draft.myReaction === null}
+                  onPress={() => setMyReaction(null)}
+                />
+                {REACTION_OPTIONS.map((r) => (
+                  <Chip
+                    key={r.key}
+                    label={r.label}
+                    active={draft.myReaction === r.key}
+                    onPress={() => setMyReaction(r.key)}
+                  />
+                ))}
+              </View>
+
+              {/* ── 칼로리 (슬라이더) ── */}
+              <View style={styles.caloriesHeader}>
+                <Text style={[styles.sectionLabel, styles.sectionLabelSpaced]}>
+                  칼로리
+                </Text>
+                <Text style={styles.caloriesValue}>{caloriesLabel}</Text>
+              </View>
+              <Slider
+                minimumValue={CAL_MIN}
+                maximumValue={CAL_MAX}
+                step={CAL_STEP}
+                value={draft.maxCalories}
+                minimumTrackTintColor={Colors.primary}
+                maximumTrackTintColor={Colors.surfaceContainerHigh}
+                thumbTintColor={Colors.primary}
+                onValueChange={setMaxCalories}
+              />
+            </ScrollView>
+
+            {/* ── Apply row ── */}
+            <View style={styles.applyRow}>
+              <Pressable
+                onPress={close}
+                style={({ pressed }) => [
+                  styles.cancelBtn,
+                  pressed && { opacity: 0.7 },
+                ]}
+              >
+                <Text style={styles.cancelText}>취소</Text>
+              </Pressable>
+              <Pressable
+                onPress={apply}
+                style={({ pressed }) => [
+                  styles.applyBtn,
+                  pressed && { opacity: 0.85, transform: [{ scale: 0.98 }] },
+                ]}
+              >
+                <Text style={styles.applyText}>
+                  {matchCount !== null
+                    ? `적용하기 (${matchCount})`
+                    : "적용하기"}
+                </Text>
+              </Pressable>
+            </View>
+          </Animated.View>
+        </View>
+      </GestureHandlerRootView>
     </Modal>
   );
 }
@@ -418,6 +383,9 @@ function Chip({
 }
 
 const styles = StyleSheet.create({
+  root: {
+    flex: 1,
+  },
   container: {
     flex: 1,
     justifyContent: "flex-end",
@@ -434,13 +402,19 @@ const styles = StyleSheet.create({
     maxHeight: "85%",
     ...Shadows.ambient,
   },
+  // 드래그 hit zone — 작은 4px 바만으론 잡기 어려우니 시트 최상단 전체
+  // 폭에 두툼한 padding으로 영역을 키운다. 시각은 동일(센터의 작은 바만 보임).
+  handleZone: {
+    alignItems: "center",
+    paddingTop: Spacing.sm,
+    paddingBottom: Spacing.base,
+    paddingHorizontal: Spacing.xl,
+  },
   handleBar: {
-    alignSelf: "center",
     width: 36,
     height: 4,
     borderRadius: Radius.full,
     backgroundColor: Colors.surfaceContainerHighest,
-    marginBottom: Spacing.base,
   },
   titleRow: {
     flexDirection: "row",

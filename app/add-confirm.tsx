@@ -28,11 +28,11 @@ import { useEffect, useState } from "react";
 import {
   ActivityIndicator,
   Pressable,
-  ScrollView,
   StyleSheet,
   Text,
   View,
 } from "react-native";
+import { KeyboardAwareScrollView } from "react-native-keyboard-controller";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 // ─── Screen ───────────────────────────────────────────────────────────────────
@@ -154,14 +154,11 @@ export default function AddConfirmScreen() {
 
     setSubmitting(true);
     try {
-      const requests = items.map((draft) => {
-        const req = mapIngredientToCreateRequest(draft);
-        // Override the per-item purchaseDate with the screen-wide picker.
-        return {
-          ...req,
-          purchaseDate: toIsoDate(purchaseDate),
-        };
-      });
+      // 화면 단위 purchaseDate를 함수에 직접 전달 — 함수가 그걸 anchor로
+      // expiryDate 폴백(미입력 시 +7일)도 계산하므로 두 값이 일관됨.
+      const requests = items.map((draft) =>
+        mapIngredientToCreateRequest(draft, purchaseDate),
+      );
       await createIngredients(requests);
       showToast(`${items.length}개를 냉장고에 담았어요`);
       resetToHome();
@@ -171,13 +168,6 @@ export default function AddConfirmScreen() {
       setSubmitting(false);
     }
   };
-
-  function toIsoDate(d: Date): string {
-    const yyyy = d.getFullYear();
-    const mm = String(d.getMonth() + 1).padStart(2, "0");
-    const dd = String(d.getDate()).padStart(2, "0");
-    return `${yyyy}-${mm}-${dd}`;
-  }
 
   const openCategoryPicker = (itemId: string) => {
     setEditingItemId(itemId);
@@ -253,11 +243,20 @@ export default function AddConfirmScreen() {
     <View style={[styles.screen, { paddingTop: insets.top }]}>
       {/* No header — removed per spec */}
 
-      {/* ── Content ── */}
-      <ScrollView
-        showsVerticalScrollIndicator={false}
+      {/* ── Content — react-native-keyboard-controller의 KeyboardAwareScrollView.
+          기존 KeyboardAvoidingView + ScrollView 조합을 한 컴포넌트로 통합.
+          iOS/Android 모두 포커스 입력칸이 키보드 위로 자동 스크롤 + bottomOffset
+          으로 카드 전체가 보이도록 추가 여유공간 확보. bottomBar는 외부 유지 —
+          키보드 시 같이 떠오르지 않아 입력 가시 영역 보호. */}
+      <KeyboardAwareScrollView
+        style={styles.scroll}
         contentContainerStyle={styles.scrollContent}
+        showsVerticalScrollIndicator={false}
         keyboardShouldPersistTaps="handled"
+        keyboardDismissMode="on-drag"
+        // 포커스 입력칸 위에 추가 여유공간 — 입력칸뿐 아니라 그 위쪽 카드의
+        // 상단부(아이콘/카테고리 라벨 등)도 함께 보이도록.
+        bottomOffset={120}
       >
         {/* Purchase date — compact variant since it's the page anchor. */}
         <ExpandableDatePicker
@@ -290,7 +289,7 @@ export default function AddConfirmScreen() {
           <Ionicons name="add-circle" size={24} color={Colors.primary} />
           <Text style={styles.addMoreText}>식재료 직접 추가하기</Text>
         </Pressable>
-      </ScrollView>
+      </KeyboardAwareScrollView>
 
       {/* ── Bottom Actions ── */}
       <View
@@ -374,6 +373,12 @@ const styles = StyleSheet.create({
   screen: {
     flex: 1,
     backgroundColor: Colors.surface,
+  },
+
+  // KeyboardAwareScrollView가 bottomBar 위 영역을 flex:1로 차지하도록.
+  // 키보드 시 내부 자동 스크롤 + bottomOffset으로 포커스 입력칸 여유 확보.
+  scroll: {
+    flex: 1,
   },
 
   // Scroll

@@ -3,6 +3,7 @@ import { Platform } from "react-native";
 import { Stack, useRouter, useSegments } from "expo-router";
 import { StatusBar } from "expo-status-bar";
 import { GestureHandlerRootView } from "react-native-gesture-handler";
+import { KeyboardProvider } from "react-native-keyboard-controller";
 import { PortalProvider } from "@gorhom/portal";
 import * as SplashScreen from "expo-splash-screen";
 import * as WebBrowser from "expo-web-browser";
@@ -98,6 +99,10 @@ export default function RootLayout() {
 
   return (
     <GestureHandlerRootView style={{ flex: 1 }}>
+      {/* KeyboardProvider — react-native-keyboard-controller가 모든 화면에서
+          KeyboardAwareScrollView 등을 쓰려면 루트에 한 번만 설치. New Arch
+          호환, GestureHandlerRootView 안쪽에 두는 게 권장 패턴. */}
+      <KeyboardProvider>
       <AuthProvider>
         <NotificationProvider>
           <RecipeRecommendationProvider>
@@ -193,6 +198,7 @@ export default function RootLayout() {
           </RecipeRecommendationProvider>
         </NotificationProvider>
       </AuthProvider>
+      </KeyboardProvider>
     </GestureHandlerRootView>
   );
 }
