@@ -31,8 +31,7 @@
         "android.permission.RECORD_AUDIO"
       ],
       "package": "com.anonymous.keepeat_front",
-      "googleServicesFile": "./google-services.json",
-      "usesCleartextTraffic": true
+      "googleServicesFile": "./google-services.json"
     },
     "web": {
       "output": "static",
@@ -59,7 +58,15 @@
       "@react-native-community/datetimepicker",
       "expo-secure-store",
       "expo-notifications",
-      "expo-web-browser"
+      "expo-web-browser",
+      [
+        "expo-build-properties",
+        {
+          "android": {
+            "usesCleartextTraffic": true
+          }
+        }
+      ]
     ],
     "experiments": {
       "typedRoutes": true,

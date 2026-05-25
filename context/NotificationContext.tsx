@@ -172,10 +172,11 @@ export function NotificationProvider({
   }, []);
 
   const markTypeRead = useCallback(async (type: NotificationType) => {
-    // Optimistic: flip the type's unread items to read in-memory, then
-    // issue a single PATCH /api/notifications/read-all/{TYPE}. Rolls back
-    // to the pre-flip snapshot on failure. No-op when nothing unread for
-    // that type — focus effects can fire freely without burning requests.
+    // 가드 정책 변경: items에 unread가 없어도 서버 PATCH는 항상 시도.
+    // 이유: 푸시 직후 receivedListener의 refresh 전에 markTypeRead가
+    // 돌면 items가 stale(새 알림 누락)이라, 옛 가드("items unread 0이면
+    // 스킵")가 서버 호출 자체를 막아 서버 isRead가 false로 남던 버그.
+    // PATCH /read-all/{type}은 멱등이라 unread 0이어도 무해.
     let snapshot: AppNotification[] = [];
     let hadUnread = false;
     setItems((prev) => {
@@ -186,11 +187,20 @@ export function NotificationProvider({
       const idSet = new Set(unreadOfType.map((n) => n.id));
       return prev.map((n) => (idSet.has(n.id) ? { ...n, isRead: true } : n));
     });
-    if (!hadUnread) return;
     try {
       await markTypeNotificationsRead(backendNotificationType(type));
+      // 서버 성공 후 — items 낙관적 flip이 안 됐던 경우(stale 가드 통과)에도
+      // 같은 타입 잔여 unread를 retroactive 동기화. 다음 refresh에 새 알림이
+      // 들어와도 이미 isRead=true. 중복 호출 안전(이미 read면 no-op).
+      if (!hadUnread) {
+        setItems((prev) =>
+          prev.map((n) =>
+            n.type === type && !n.isRead ? { ...n, isRead: true } : n,
+          ),
+        );
+      }
     } catch {
-      setItems(snapshot);
+      if (hadUnread) setItems(snapshot);
     }
   }, []);
 
@@ -292,11 +302,17 @@ export function NotificationProvider({
         const domainType = toDomainNotificationType(apiType);
         if (!domainType) return;
         const path = routeForNotificationType(domainType);
-        if (path) router.push(path);
+        if (path) {
+          // 푸시 탭 즉시 markTypeRead — destination에 이미 있어 useFocusEffect가
+          // 재발화 안 하는 케이스도 보장. markTypeRead가 서버를 항상 시도하므로
+          // items가 stale(새 알림 누락)이어도 PATCH는 들어감.
+          markTypeRead(domainType);
+          router.push(path);
+        }
       },
     );
     return () => sub.remove();
-  }, [isAuthenticated]);
+  }, [isAuthenticated, markTypeRead]);
 
   // Cold-start: if the app was launched by tapping a push, route once.
   // A ref guards against the strict-mode double-mount re-firing the same
@@ -314,7 +330,12 @@ export function NotificationProvider({
         const domainType = toDomainNotificationType(apiType);
         if (!domainType) return;
         const path = routeForNotificationType(domainType);
-        if (path) router.push(path);
+        if (path) {
+          // 콜드스타트 푸시 탭도 즉시 markTypeRead — 부팅 직후라 items가
+          // 비어있거나 stale이지만 markTypeRead가 서버를 항상 호출해 OK.
+          markTypeRead(domainType);
+          router.push(path);
+        }
       })
       // 네이티브 API 실패 — unhandled rejection 방지용 silent catch.
       // 콜드 스타트 라우팅이 실패할 뿐 사용자 플로우엔 영향 없음.
@@ -322,7 +343,7 @@ export function NotificationProvider({
     return () => {
       cancelled = true;
     };
-  }, [isAuthenticated]);
+  }, [isAuthenticated, markTypeRead]);
 
   const value = useMemo<NotificationContextValue>(
     () => ({

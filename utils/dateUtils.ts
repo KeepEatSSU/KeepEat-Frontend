@@ -164,9 +164,19 @@ export function formatDaysApprox(days: number): string {
  *
  * Future timestamps (or skewed clocks producing negative diffs) collapse
  * to "방금 전" so the UI never shows a nonsensical "0분 전" or negative.
+ *
+ * 타임존 처리: 백엔드가 UTC 시각을 보내면서 Z/오프셋 표기를 누락하는
+ * 케이스(예: "2026-05-25T10:39:13.316701")가 있는데, ECMAScript 사양상
+ * 타임존 없는 date-time은 로컬로 해석되어 KST에선 +9시간 옛날로 계산됨.
+ * 방어: 입력에 이미 타임존 표기(Z 또는 ±HH:MM/±HHMM)가 있으면 그대로
+ * 두고, 없을 때만 "Z"를 부착해 UTC로 강제 해석. 백엔드가 나중에 Z를
+ * 붙여 고쳐도 자동 호환(이중 보정 없음).
  */
+const TZ_SUFFIX_RE = /(Z|[+-]\d{2}:?\d{2})$/;
+
 export function formatRelativeTime(isoDate: string): string {
-  const target = new Date(isoDate);
+  const normalized = TZ_SUFFIX_RE.test(isoDate) ? isoDate : `${isoDate}Z`;
+  const target = new Date(normalized);
   const diffMs = Date.now() - target.getTime();
 
   if (diffMs < 60_000) return "방금 전";
