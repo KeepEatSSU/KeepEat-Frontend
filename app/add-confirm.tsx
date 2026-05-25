@@ -28,11 +28,12 @@ import { useEffect, useState } from "react";
 import {
   ActivityIndicator,
   Pressable,
+  ScrollView,
   StyleSheet,
   Text,
   View,
 } from "react-native";
-import { KeyboardAwareScrollView } from "react-native-keyboard-controller";
+import { KeyboardAvoidingView } from "react-native-keyboard-controller";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 // ─── Screen ───────────────────────────────────────────────────────────────────
@@ -243,53 +244,57 @@ export default function AddConfirmScreen() {
     <View style={[styles.screen, { paddingTop: insets.top }]}>
       {/* No header — removed per spec */}
 
-      {/* ── Content — react-native-keyboard-controller의 KeyboardAwareScrollView.
-          기존 KeyboardAvoidingView + ScrollView 조합을 한 컴포넌트로 통합.
-          iOS/Android 모두 포커스 입력칸이 키보드 위로 자동 스크롤 + bottomOffset
-          으로 카드 전체가 보이도록 추가 여유공간 확보. bottomBar는 외부 유지 —
-          키보드 시 같이 떠오르지 않아 입력 가시 영역 보호. */}
-      <KeyboardAwareScrollView
-        style={styles.scroll}
-        contentContainerStyle={styles.scrollContent}
-        showsVerticalScrollIndicator={false}
-        keyboardShouldPersistTaps="handled"
-        keyboardDismissMode="on-drag"
-        // 포커스 입력칸 위에 추가 여유공간 — 입력칸뿐 아니라 그 위쪽 카드의
-        // 상단부(아이콘/카테고리 라벨 등)도 함께 보이도록.
-        bottomOffset={120}
-      >
-        {/* Purchase date — compact variant since it's the page anchor. */}
-        <ExpandableDatePicker
-          label="구매일자"
-          value={purchaseDate}
-          onChange={setPurchaseDate}
-          variant="compact"
-        />
-
-        {/* Ingredient cards */}
-        {items.map((item) => (
-          <IngredientEditCard
-            key={item.id}
-            item={item}
-            purchaseDate={purchaseDate}
-            onUpdate={(patch) => updateItem(item.id, patch)}
-            onDelete={() => deleteItem(item.id)}
-            onCategoryPress={() => openCategoryPicker(item.id)}
-          />
-        ))}
-
-        {/* Add more */}
-        <Pressable
-          onPress={addEmpty}
-          style={({ pressed }) => [
-            styles.addMoreBtn,
-            pressed && { opacity: 0.7 },
-          ]}
+      {/* ── Content — keyboard-controller의 KeyboardAvoidingView + ScrollView.
+          이전 KeyboardAwareScrollView는 add-confirm이 fullScreenModal로 mount
+          되는 iOS 환경에서 키보드 이벤트를 못 잡아 입력칸 가림. 이 패키지의
+          KeyboardAvoidingView는 KeyboardProvider의 worklet 기반 이벤트 시스템을
+          공유해 modal 안에서도 정상 작동. behavior="padding"으로 영역을 줄여
+          ScrollView가 자동 스크롤 가능한 좁은 viewport로 동작.
+          bottomBar는 외부 유지 — 키보드 시 같이 안 떠올라 입력 가시 영역 보호. */}
+      <KeyboardAvoidingView style={styles.kav} behavior="padding">
+        <ScrollView
+          style={styles.scroll}
+          contentContainerStyle={styles.scrollContent}
+          showsVerticalScrollIndicator={false}
+          keyboardShouldPersistTaps="handled"
+          keyboardDismissMode="on-drag"
+          // iOS: 줄어든 viewport 안에서 포커스 입력칸을 자동으로 키보드 위로
+          // 스크롤. KAV가 영역 제어, 이건 자동 스크롤 — 이중 보강.
+          automaticallyAdjustKeyboardInsets
         >
-          <Ionicons name="add-circle" size={24} color={Colors.primary} />
-          <Text style={styles.addMoreText}>식재료 직접 추가하기</Text>
-        </Pressable>
-      </KeyboardAwareScrollView>
+          {/* Purchase date — compact variant since it's the page anchor. */}
+          <ExpandableDatePicker
+            label="구매일자"
+            value={purchaseDate}
+            onChange={setPurchaseDate}
+            variant="compact"
+          />
+
+          {/* Ingredient cards */}
+          {items.map((item) => (
+            <IngredientEditCard
+              key={item.id}
+              item={item}
+              purchaseDate={purchaseDate}
+              onUpdate={(patch) => updateItem(item.id, patch)}
+              onDelete={() => deleteItem(item.id)}
+              onCategoryPress={() => openCategoryPicker(item.id)}
+            />
+          ))}
+
+          {/* Add more */}
+          <Pressable
+            onPress={addEmpty}
+            style={({ pressed }) => [
+              styles.addMoreBtn,
+              pressed && { opacity: 0.7 },
+            ]}
+          >
+            <Ionicons name="add-circle" size={24} color={Colors.primary} />
+            <Text style={styles.addMoreText}>식재료 직접 추가하기</Text>
+          </Pressable>
+        </ScrollView>
+      </KeyboardAvoidingView>
 
       {/* ── Bottom Actions ── */}
       <View
@@ -375,8 +380,12 @@ const styles = StyleSheet.create({
     backgroundColor: Colors.surface,
   },
 
-  // KeyboardAwareScrollView가 bottomBar 위 영역을 flex:1로 차지하도록.
-  // 키보드 시 내부 자동 스크롤 + bottomOffset으로 포커스 입력칸 여유 확보.
+  // KAV(keyboard-controller)가 bottomBar 위 영역을 flex:1로 차지, 키보드
+  // 시 자기 padding을 늘려 자식 ScrollView 영역을 줄임. ScrollView는 그
+  // 줄어든 영역을 flex:1로 채우며 내부 자동 스크롤 처리.
+  kav: {
+    flex: 1,
+  },
   scroll: {
     flex: 1,
   },

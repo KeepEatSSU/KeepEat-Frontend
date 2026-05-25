@@ -32,7 +32,11 @@ import {
   getOwnedIngredientsByRecipe,
   type OwnedRecipeIngredientDto,
 } from "@/services/userIngredients";
-import { formatKoreanShortDate } from "@/utils/dateUtils";
+import {
+  formatDDay,
+  formatKoreanShortDate,
+  getDDayBadgeColor,
+} from "@/utils/dateUtils";
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -44,14 +48,6 @@ const STORAGE_CHIP: Record<
   냉동: { bg: "#E0F2FE", text: "#0369A1", label: "냉동" },
   실온: { bg: "#F5F5F4", text: "#44403C", label: "실온" },
 };
-
-/** 남은 일자를 사람이 읽는 문자열로. 0/1은 임박 강조용. */
-function formatDaysLeft(daysLeft: number): string {
-  if (daysLeft === 0) return "오늘 만료";
-  if (daysLeft === 1) return "내일 만료";
-  if (daysLeft > 0) return `${daysLeft}일 남음`;
-  return `${Math.abs(daysLeft)}일 지남`;
-}
 
 // ─── Screen ───────────────────────────────────────────────────────────────────
 
@@ -231,7 +227,12 @@ export default function CookingCompleteScreen() {
             const hasNickname =
               !!item.customName && item.customName !== item.name;
             const showDaysLeft = typeof item.daysLeft === "number";
-            const urgent = showDaysLeft && (item.daysLeft as number) <= 1;
+            // 냉장고 탭과 동일한 D-N/D-Day/D+N 텍스트 + 4단계 status 색상.
+            // formatDDay/getDDayBadgeColor는 utils/dateUtils.ts에서 공유.
+            const dday = showDaysLeft
+              ? formatDDay(item.daysLeft as number)
+              : null;
+            const ddayColor = dday ? getDDayBadgeColor(dday.status) : undefined;
             const purchaseText = item.purchaseDate
               ? `${formatKoreanShortDate(item.purchaseDate)} 구매`
               : "";
@@ -300,18 +301,13 @@ export default function CookingCompleteScreen() {
                   )}
                 </View>
 
-                {(purchaseText || showDaysLeft) && (
+                {(purchaseText || dday) && (
                   <Text style={styles.toggleMeta}>
                     {purchaseText}
-                    {purchaseText && showDaysLeft ? " · " : ""}
-                    {showDaysLeft && (
-                      <Text
-                        style={[
-                          styles.toggleMeta,
-                          urgent && styles.toggleMetaUrgent,
-                        ]}
-                      >
-                        {formatDaysLeft(item.daysLeft as number)}
+                    {purchaseText && dday ? " · " : ""}
+                    {dday && (
+                      <Text style={[styles.toggleMeta, { color: ddayColor }]}>
+                        {dday.text}
                       </Text>
                     )}
                   </Text>

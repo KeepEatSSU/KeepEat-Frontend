@@ -197,7 +197,7 @@ function ToastView({
 
   return (
     <View
-      style={[styles.toastContainer, { bottom: Math.max(insets.bottom, 16) + 60 }]}
+      style={[styles.toastContainer, { bottom: Math.max(insets.bottom, 16) + 110 }]}
       pointerEvents="none"
     >
       <Animated.View

@@ -323,6 +323,24 @@ export function RecipeFilterSheet({
               />
             </ScrollView>
 
+            {/* ── Match-count hint ──
+                매칭 개수를 아는 화면(내 레시피처럼 items 전달)만 표시. explore
+                같이 서버 페이징으로 개수 모르는 화면은 matchCount===null이라
+                줄 자체를 렌더 안 함(공간도 차지 X). 나중에 explore에 카운트가
+                생겨도 같은 자리에 텍스트만 채우면 되어 레이아웃 안정. */}
+            {matchCount !== null && (
+              <Text
+                style={[
+                  styles.matchHint,
+                  matchCount === 0 && styles.matchHintEmpty,
+                ]}
+              >
+                {matchCount === 0
+                  ? "조건에 맞는 레시피가 없어요"
+                  : `조건에 맞는 레시피 ${matchCount}개`}
+              </Text>
+            )}
+
             {/* ── Apply row ── */}
             <View style={styles.applyRow}>
               <Pressable
@@ -341,11 +359,9 @@ export function RecipeFilterSheet({
                   pressed && { opacity: 0.85, transform: [{ scale: 0.98 }] },
                 ]}
               >
-                <Text style={styles.applyText}>
-                  {matchCount !== null
-                    ? `적용하기 (${matchCount})`
-                    : "적용하기"}
-                </Text>
+                {/* 모든 호출처에서 동일한 라벨 — 매칭 개수는 위 hint 줄에서
+                    개수를 아는 화면만 분리 표시. */}
+                <Text style={styles.applyText}>적용하기</Text>
               </Pressable>
             </View>
           </Animated.View>
@@ -481,6 +497,20 @@ const styles = StyleSheet.create({
     fontWeight: FontWeight.semiBold,
     color: Colors.onSurface,
     marginTop: Spacing.lg,
+  },
+  // 매칭 개수 hint — applyRow 위, ScrollView 다음. 개수 아는 화면만 노출.
+  // 0건 변형은 톤만 살짝 죽여 "비활성/없음" 시그널을 주지만 버튼은 그대로
+  // 활성(0건 결과도 유효한 적용 결과).
+  matchHint: {
+    fontSize: FontSize.bodySm,
+    fontWeight: FontWeight.medium,
+    color: Colors.onSurfaceVariant,
+    textAlign: "center",
+    paddingHorizontal: Spacing.xl,
+    paddingTop: Spacing.sm,
+  },
+  matchHintEmpty: {
+    color: Colors.outline,
   },
   applyRow: {
     flexDirection: "row",

@@ -279,15 +279,16 @@ export default function RecipeScreen() {
   }, [selectionMode, exitSelectionMode]);
 
   const handleRecommendPress = () => {
-    if (status === "idle" || status === "error") {
-      requestRecommendation();
-      showToast(
-        "레시피 생성에 최대 2분이 소요됩니다. 완료되면 알려드릴게요!",
-      );
-    } else if (status === "ready") {
+    if (status === "ready") {
       markSwiping();
       router.push("/recipe-swipe" as never);
+      return;
     }
+    if (status !== "idle" && status !== "error") return;
+    // 안내/에러 토스트는 모두 context.requestRecommendation 안에서 결과
+    // 기반으로 띄움 (try 시작 시 안내, catch에서 에러로 교체). 타이밍 추측
+    // 없음 — Toast single-instance가 안내를 에러로 자동 dismiss + 교체.
+    requestRecommendation();
   };
 
   if (error && !hasLoadedOnce) {

@@ -130,6 +130,21 @@ export async function markTypeNotificationsRead(
   await api.patch(`/api/notifications/read-all/${type}`);
 }
 
+// ─── Delete (DELETE /api/notifications/{id}, DELETE /api/notifications) ─────
+
+/** 단일 알림 삭제 — 일반 모드 카드 X 버튼이 호출. */
+export async function deleteNotification(id: number): Promise<void> {
+  await api.delete(`/api/notifications/${id}`);
+}
+
+/**
+ * 일괄 알림 삭제 — 다중선택 모드에서 선택된 ids 배열로 요청. axios DELETE는
+ * body를 `data`로 실어보낸다. `deleteUserIngredients` 패턴과 동일.
+ */
+export async function deleteNotifications(ids: number[]): Promise<void> {
+  await api.delete("/api/notifications", { data: { ids } });
+}
+
 // ─── Push token (POST/DELETE /api/notifications/token) ───────────────────────
 // Expo push token을 서버에 등록/삭제. AuthContext의 login/logout 흐름이
 // `services/pushNotifications.ts`의 convenience wrapper 경유로 호출.

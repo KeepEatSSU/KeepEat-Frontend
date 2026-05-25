@@ -38,6 +38,8 @@ import { useAuth } from "@/context/AuthContext";
 import { useToast } from "@/components/Toast";
 import {
   backendNotificationType,
+  deleteNotification,
+  deleteNotifications,
   fetchNotificationsPage,
   markAllNotificationsRead,
   markNotificationRead,
@@ -69,6 +71,10 @@ interface NotificationContextValue {
    * `items` only (page-1 scope, method A from diagnosis).
    */
   markTypeRead: (type: NotificationType) => Promise<void>;
+  /** 단일 알림 삭제 — 낙관적 제거 + 실패 시 롤백. */
+  removeNotification: (id: number) => Promise<void>;
+  /** 일괄 알림 삭제 — 선택된 ids만. 낙관적 제거 + 실패 시 롤백. */
+  removeNotifications: (ids: number[]) => Promise<void>;
 }
 
 const NotificationContext = createContext<NotificationContextValue | undefined>(
@@ -188,6 +194,63 @@ export function NotificationProvider({
     }
   }, []);
 
+  // 삭제 후 리스트가 적게 남고 hasNext면 빈 화면 방지 위해 다음 페이지를
+  // 한 번 끌어옴. loading 중엔 호출 안 함 → 무한루프 가드. 임계치는 페이지
+  // 사이즈의 1/4 정도(과한 fetch 회피). loadMore는 hasNext/loading 자체
+  // 가드를 한 번 더 갖는다.
+  const LOW_WATERMARK = 5;
+  const maybeBackfill = useCallback((remaining: number) => {
+    if (remaining < LOW_WATERMARK && hasNext && !loading) {
+      loadMore();
+    }
+  }, [hasNext, loading, loadMore]);
+
+  const removeNotification = useCallback(
+    async (id: number) => {
+      let snapshot: AppNotification[] = [];
+      let nextLength = 0;
+      setItems((prev) => {
+        if (!prev.some((n) => n.id === id)) return prev;
+        snapshot = prev;
+        const next = prev.filter((n) => n.id !== id);
+        nextLength = next.length;
+        return next;
+      });
+      if (snapshot.length === 0) return;
+      try {
+        await deleteNotification(id);
+        maybeBackfill(nextLength);
+      } catch {
+        setItems(snapshot);
+      }
+    },
+    [maybeBackfill],
+  );
+
+  const removeNotifications = useCallback(
+    async (ids: number[]) => {
+      if (ids.length === 0) return;
+      let snapshot: AppNotification[] = [];
+      let nextLength = 0;
+      const idSet = new Set(ids);
+      setItems((prev) => {
+        if (!prev.some((n) => idSet.has(n.id))) return prev;
+        snapshot = prev;
+        const next = prev.filter((n) => !idSet.has(n.id));
+        nextLength = next.length;
+        return next;
+      });
+      if (snapshot.length === 0) return;
+      try {
+        await deleteNotifications(ids);
+        maybeBackfill(nextLength);
+      } catch {
+        setItems(snapshot);
+      }
+    },
+    [maybeBackfill],
+  );
+
   // Auth-driven lifecycle: first fetch when authenticated, clear on logout.
   useEffect(() => {
     if (!isAuthenticated) {
@@ -272,6 +335,8 @@ export function NotificationProvider({
       markRead,
       markAllRead,
       markTypeRead,
+      removeNotification,
+      removeNotifications,
     }),
     [
       items,
@@ -283,6 +348,8 @@ export function NotificationProvider({
       markRead,
       markAllRead,
       markTypeRead,
+      removeNotification,
+      removeNotifications,
     ],
   );
 

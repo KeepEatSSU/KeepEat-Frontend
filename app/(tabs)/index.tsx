@@ -29,7 +29,7 @@ import {
 } from "@/services/userIngredients";
 import { getErrorMessage } from "@/services/api";
 import { useNotifications } from "@/context/NotificationContext";
-import { getDDayInfo } from "@/utils/dateUtils";
+import { getDDayBadgeColor, getDDayInfo } from "@/utils/dateUtils";
 import { Ionicons } from "@expo/vector-icons";
 import * as Haptics from "expo-haptics";
 import { useFocusEffect, useRouter } from "expo-router";
@@ -52,21 +52,6 @@ import Animated, {
   FadeOutDown,
 } from "react-native-reanimated";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
-
-// ─── Helpers ──────────────────────────────────────────────────────────────────
-
-function getDDayBadgeColor(status: string): string {
-  switch (status) {
-    case "expired":
-    case "urgent":
-      return Colors.error;
-    case "caution":
-      return "#F9A825";
-    default:
-      return Colors.primary;
-  }
-}
-
 
 // ─── Grid Card ────────────────────────────────────────────────────────────────
 

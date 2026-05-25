@@ -299,7 +299,10 @@ const styles = StyleSheet.create({
     width: 52,
     height: 52,
     borderRadius: 26,
-    backgroundColor: Colors.primaryContainer,
+    // FAB는 앱의 핵심 CTA — Primary(진한 초록)와 의미 일치. 이전엔 primaryContainer
+    // (#2ECC71 밝은 초록)였으나 메인 색과 톤 통일. primaryContainer 토큰 자체는
+    // 스피너/heart/gradient 등 다른 곳에서 활기찬 강조용으로 유지.
+    backgroundColor: Colors.primary,
     alignItems: "center",
     justifyContent: "center",
     ...Shadows.fab,

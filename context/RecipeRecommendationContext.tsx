@@ -269,6 +269,12 @@ export function RecipeRecommendationProvider({
       completedAt: null,
     }));
 
+    // "2분 소요" 안내 — 요청 시작 직후 띄움. Toast 시스템이 single-instance
+    // 라(`clearTimeout` 후 즉시 교체) 빠른 에러가 와도 catch의 에러 토스트가
+    // 안내를 자동으로 dismiss + 교체 → 두 토스트가 동시에 보일 일 없음.
+    // 호출처(recipe.tsx)에서 타이밍 추측(setTimeout) 없이 결과 기반 분기.
+    showToast("레시피 생성에 최대 2분이 소요됩니다. 완료되면 알려드릴게요!");
+
     try {
       const generated = await generateAiRecipes();
       // Map GeneratedRecipeDto back to domain Recipe to feed the swipe UI.
@@ -289,7 +295,10 @@ export function RecipeRecommendationProvider({
 
       handleCompletion(mappedRecipes, generated);
     } catch (error) {
-      console.error("[Recipe Gen Error]", error);
+      // console.log 사용 — console.error는 RN dev LogBox 빨간 박스를 띄워
+      // 이미 토스트로 처리되는 친화 에러까지 시각적으로 두 번 노출됨.
+      // 디버깅 로그는 유지하되 LogBox 트리거만 회피.
+      console.log("[Recipe Gen Error]", error);
       setState((prev) => ({ ...prev, status: "idle" }));
       // 400(식재료 부족)과 그 외(서버 오류)는 폴백 카피가 달라 분기 유지.
       // 두 경로 모두 getErrorMessage를 통과해 서버 message가 있으면 우선 노출.

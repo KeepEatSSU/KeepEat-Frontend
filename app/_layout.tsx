@@ -105,9 +105,12 @@ export default function RootLayout() {
       <KeyboardProvider>
       <AuthProvider>
         <NotificationProvider>
-          <RecipeRecommendationProvider>
           <PortalProvider>
             <ToastProvider>
+              {/* RecipeRecommendationProvider는 useToast()를 쓰므로 반드시
+                  ToastProvider 안쪽이어야 함 — 바깥에 두면 useToast가 기본
+                  no-op을 받아 안내/에러 토스트가 무동작이 된다. */}
+              <RecipeRecommendationProvider>
               <AuthGate>
                 <IngredientMasterBootstrap />
                 <PushPermissionPrompt />
@@ -193,9 +196,9 @@ export default function RootLayout() {
                 </Stack>
               </AuthGate>
               <StatusBar style="dark" />
+              </RecipeRecommendationProvider>
             </ToastProvider>
           </PortalProvider>
-          </RecipeRecommendationProvider>
         </NotificationProvider>
       </AuthProvider>
       </KeyboardProvider>

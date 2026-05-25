@@ -123,7 +123,9 @@ export const Shadows = {
     default: {},
   }),
   fab: {
-    shadowColor: "#2ECC71",
+    // FAB 본체가 Primary(#006D37 진한 초록)로 통일됨 — 그림자도 동일 톤으로
+    // 맞춰 일관된 발광 (이전 #2ECC71 밝은 초록은 본체와 색이 어긋남).
+    shadowColor: "#006D37",
     shadowOffset: { width: 0, height: 8 },
     shadowOpacity: 0.3,
     shadowRadius: 16,

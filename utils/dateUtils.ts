@@ -3,6 +3,8 @@
  * shared by the notification tray.
  */
 
+import { Colors } from "@/constants/theme";
+
 /** Format a Date as "YYYY-MM-DD" in local time (safe for react-native-calendars). */
 export function toISODate(date: Date): string {
   const y = date.getFullYear();
@@ -17,13 +19,70 @@ export function fromISODate(iso: string): Date {
   return new Date(y, m - 1, d);
 }
 
+export type DDayStatus = "expired" | "urgent" | "caution" | "safe";
+
 export interface DDayInfo {
   /** Remaining days (negative = expired) */
   daysLeft: number;
   /** Formatted text: "D-5", "D-Day", "D+15" */
   text: string;
   /** "expired" | "urgent" | "caution" | "safe" */
-  status: "expired" | "urgent" | "caution" | "safe";
+  status: DDayStatus;
+}
+
+/**
+ * 숫자형 daysLeft만 받아 text/status 산출 — by-recipe 등 서버가 미리 계산해
+ * 보낸 daysLeft를 그대로 표기에 쓰는 화면(cooking-complete)이 직접 호출 가능.
+ * `getDDayInfo`도 내부적으로 이 함수를 호출해 출력 일관성 유지.
+ *
+ *   text: D-N(>0) / D-Day(0) / D+N(<0).  Infinity는 방어적으로 "∞".
+ *   status: <0 expired / 0~3 urgent / 4~7 caution / 8+ safe.
+ */
+export function formatDDay(daysLeft: number): {
+  text: string;
+  status: DDayStatus;
+} {
+  if (!Number.isFinite(daysLeft)) {
+    return { text: "∞", status: "safe" };
+  }
+
+  let text: string;
+  if (daysLeft > 0) {
+    text = `D-${daysLeft}`;
+  } else if (daysLeft === 0) {
+    text = "D-Day";
+  } else {
+    text = `D+${Math.abs(daysLeft)}`;
+  }
+
+  let status: DDayStatus;
+  if (daysLeft < 0) {
+    status = "expired";   // 기한 초과
+  } else if (daysLeft <= 3) {
+    status = "urgent";    // 임박 (0~3일) → 빨강
+  } else if (daysLeft <= 7) {
+    status = "caution";   // 주의 (4~7일) → 노랑/주황
+  } else {
+    status = "safe";      // 안전 (8일+) → 초록
+  }
+
+  return { text, status };
+}
+
+/**
+ * 4단계 status를 화면 색으로 매핑 — 냉장고 카드/요리완료창 등에서 공유.
+ * (이전 app/(tabs)/index.tsx 로컬 함수를 utils로 이동, 구현/시그니처 동일.)
+ */
+export function getDDayBadgeColor(status: string): string {
+  switch (status) {
+    case "expired":
+    case "urgent":
+      return Colors.error;
+    case "caution":
+      return "#F9A825";
+    default:
+      return Colors.primary;
+  }
 }
 
 /**
@@ -60,26 +119,7 @@ export function getDDayInfo(
   const diffMs = target.getTime() - today.getTime();
   const daysLeft = Math.round(diffMs / (1000 * 60 * 60 * 24));
 
-  let text: string;
-  if (daysLeft > 0) {
-    text = `D-${daysLeft}`;
-  } else if (daysLeft === 0) {
-    text = "D-Day";
-  } else {
-    text = `D+${Math.abs(daysLeft)}`;
-  }
-
-  let status: DDayInfo["status"];
-  if (daysLeft < 0) {
-    status = "expired";   // 기한 초과
-  } else if (daysLeft <= 3) {
-    status = "urgent";    // 임박 (0~3일) → 빨강
-  } else if (daysLeft <= 7) {
-    status = "caution";   // 주의 (4~7일) → 노랑/주황
-  } else {
-    status = "safe";      // 안전 (8일+) → 초록
-  }
-
+  const { text, status } = formatDDay(daysLeft);
   return { daysLeft, text, status };
 }
 
