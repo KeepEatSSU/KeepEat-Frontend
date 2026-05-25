@@ -80,6 +80,16 @@ export default function ExploreScreen() {
   // responses (slower previous fetch resolving after a newer one) get dropped.
   const requestIdRef = useRef(0);
 
+  // Mirror of the latest `searchQuery` for callbacks whose identity must stay
+  // stable across keystrokes (focus effect below). Reading from this ref
+  // avoids a stale closure without adding `searchQuery` to those deps —
+  // which would otherwise re-fire the focus effect on every character typed
+  // and race the debounced search.
+  const searchQueryRef = useRef(searchQuery);
+  useEffect(() => {
+    searchQueryRef.current = searchQuery;
+  }, [searchQuery]);
+
   const loadFirstPage = useCallback(
     async (keyword: string, opts: { refreshing?: boolean } = {}) => {
       const myRequestId = ++requestIdRef.current;
@@ -149,12 +159,13 @@ export default function ExploreScreen() {
   // Refresh on tab focus so reactions/cooks done elsewhere reflect quickly.
   // Guarded by hasLoadedOnce so the initial mount's debounce-driven load
   // isn't immediately stomped by a focus fire that produces an identical
-  // request.
+  // request. Reads keyword from `searchQueryRef` so returning from a pushed
+  // detail screen re-fetches with the *current* search — not the empty value
+  // captured when this callback was first memoized.
   useFocusEffect(
     useCallback(() => {
-      if (hasLoadedOnce) loadFirstPage(searchQuery);
-      // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [hasLoadedOnce]),
+      if (hasLoadedOnce) loadFirstPage(searchQueryRef.current);
+    }, [hasLoadedOnce, loadFirstPage]),
   );
 
   const handleRefresh = () => loadFirstPage(searchQuery, { refreshing: true });

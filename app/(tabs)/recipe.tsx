@@ -658,7 +658,7 @@ const styles = StyleSheet.create({
   selectionCheckbox: {
     position: "absolute",
     top: Spacing.md,
-    left: Spacing.md,
+    right: Spacing.md,
     width: 24,
     height: 24,
     borderRadius: 12,
