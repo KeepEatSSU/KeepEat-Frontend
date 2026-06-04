@@ -104,9 +104,9 @@ export default function RootLayout() {
           호환, GestureHandlerRootView 안쪽에 두는 게 권장 패턴. */}
       <KeyboardProvider>
       <AuthProvider>
-        <NotificationProvider>
-          <PortalProvider>
-            <ToastProvider>
+        <PortalProvider>
+          <ToastProvider>
+            <NotificationProvider>
               {/* RecipeRecommendationProvider는 useToast()를 쓰므로 반드시
                   ToastProvider 안쪽이어야 함 — 바깥에 두면 useToast가 기본
                   no-op을 받아 안내/에러 토스트가 무동작이 된다. */}
@@ -197,9 +197,9 @@ export default function RootLayout() {
               </AuthGate>
               <StatusBar style="dark" />
               </RecipeRecommendationProvider>
-            </ToastProvider>
-          </PortalProvider>
-        </NotificationProvider>
+            </NotificationProvider>
+          </ToastProvider>
+        </PortalProvider>
       </AuthProvider>
       </KeyboardProvider>
     </GestureHandlerRootView>

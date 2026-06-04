@@ -116,24 +116,22 @@ interface RecipeRecommendationContextValue extends RecipeRecommendationState {
 
 // ─── Notification Setup ───────────────────────────────────────────────────────
 
-// Foreground 표시 정책은 타입별로 다르다 — RECIPE_READY는 NotificationContext의
-// addNotificationReceivedListener가 인앱 토스트로 대체 표시하므로 OS 배너까지
-// 같이 뜨면 중복. 반대로 EXPIRY_SOON/NOTICE는 인앱 대체가 없으므로 다른 탭을
-// 보고 있을 때 사용자가 놓치지 않도록 OS 배너를 그대로 띄운다. 배지는 같이
-// 올려서 OS 앱 아이콘에도 반영. 소리는 전체적으로 off (앱 정체성 유지).
-// 백그라운드 푸시는 이 핸들러와 무관하게 OS가 항상 자체 표시.
+// Foreground 표시 정책: 전 타입(RECIPE_READY/EXPIRY_SOON/NOTICE)을 인앱
+// 드롭다운(NotificationContext의 addNotificationReceivedListener →
+// showNotification)으로 통일한다. OS 배너까지 같이 뜨면 중복이므로 포그라운드
+// 에서는 배너/사운드/리스트/배지를 전부 억제 — 이 핸들러는 "앱이 켜진 동안
+// 도착한 알림"에만 적용된다. 백그라운드/종료 시 알림은 이 핸들러를 거치지
+// 않고 OS가 자체 표시하므로 그대로 유지된다.
+//
+// shouldShowAlert(구 API, deprecated)는 제거 — shouldShowBanner/shouldShowList
+// 신 API만으로 충분하고 콘솔 경고를 없앤다.
 Notifications.setNotificationHandler({
-  handleNotification: async (notification) => {
-    const apiType = notification.request.content.data?.type;
-    const isInAppHandled = apiType === "RECIPE_READY";
-    return {
-      shouldShowAlert: !isInAppHandled,
-      shouldShowBanner: !isInAppHandled,
-      shouldShowList: !isInAppHandled,
-      shouldPlaySound: false,
-      shouldSetBadge: !isInAppHandled,
-    };
-  },
+  handleNotification: async () => ({
+    shouldShowBanner: false,
+    shouldShowList: false,
+    shouldPlaySound: false,
+    shouldSetBadge: false,
+  }),
 });
 
 // ─── Context ──────────────────────────────────────────────────────────────────

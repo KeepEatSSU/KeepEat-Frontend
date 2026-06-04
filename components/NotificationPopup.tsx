@@ -15,7 +15,7 @@
  *   home). targetId hooks in A-2 once the backend supplies it.
  */
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { ActivityIndicator, FlatList, Modal, Pressable, StyleSheet, Text, View } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 import * as Haptics from "expo-haptics";
@@ -34,15 +34,8 @@ import type {
   NotificationType,
 } from "@/constants/domain";
 import { formatRelativeTime } from "@/utils/dateUtils";
-import { routeForNotificationType } from "@/utils/notificationRouting";
-import { useRecipeRecommendation } from "@/context/RecipeRecommendationContext";
+import { resolveNotificationAction } from "@/utils/notificationRouting";
 import { ConfirmModal } from "@/components/ConfirmModal";
-
-// RECIPE_READY가 ready 아닐 때 모달 내부에 띄우는 안내 pill 표시 시간.
-// iOS UIModalPresentationFullScreen이 root window를 덮어 전역 Toast가
-// 모달 위에 안 그려지는 한계를 우회 — 모달 내부에서 자체 안내 (Toast.tsx
-// 헤더 Known Issue 참조).
-const HINT_DURATION_MS = 2500;
 
 // Per-type icon + accent color. Kept inline (not a separate config file)
 // because the popup is the only consumer.
@@ -106,26 +99,6 @@ export function NotificationPopup({
 }: Props) {
   const router = useRouter();
   const insets = useSafeAreaInsets();
-  // RECIPE_READY 카드 탭 시 swipe로 이동할지 판단하는 게이트. recommendation
-  // status가 "ready"여야만 이동(빈 화면 회피). Provider 계층상 popup이
-  // RecipeRecommendationProvider 안쪽이라 hook 호출 안전.
-  const { status: recommendationStatus } = useRecipeRecommendation();
-
-  // 모달 내부 안내 pill — RECIPE_READY ready 아닐 때 표시. 전역 Toast가
-  // iOS fullScreen modal에 가려지는 한계를 우회해 모달 안에서 자체 렌더.
-  const [hint, setHint] = useState<string | null>(null);
-  const hintTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-
-  const showHint = useCallback((message: string) => {
-    // 새 hint 뜨면 진행 중 타이머 cancel 후 재설정 — 연속 탭 시 메시지가
-    // 갱신되고 타이머도 리셋되어 마지막 메시지가 끝까지 보임.
-    if (hintTimerRef.current) clearTimeout(hintTimerRef.current);
-    setHint(message);
-    hintTimerRef.current = setTimeout(() => {
-      setHint(null);
-      hintTimerRef.current = null;
-    }, HINT_DURATION_MS);
-  }, []);
 
   // 본문 펼침 상태 — 목적지 없는 타입(NOTICE)이 카드 탭으로 본문을 펼치고 다시
   // 접을 수 있게 한다. 팝업이 닫힐 때 리셋해서 다음 오픈은 항상 collapsed 상태로.
@@ -151,25 +124,12 @@ export function NotificationPopup({
   useEffect(() => {
     if (!visible) {
       setExpandedIds(new Set());
-      // 모달 닫힐 때 hint도 즉시 정리 — 다음 열림 시 잔상 없게.
-      if (hintTimerRef.current) {
-        clearTimeout(hintTimerRef.current);
-        hintTimerRef.current = null;
-      }
-      setHint(null);
       // 다중선택 모드/선택 항목도 닫을 때 리셋.
       setSelectMode(false);
       setSelectedIds(new Set());
       setConfirmDeleteVisible(false);
     }
   }, [visible]);
-
-  // Unmount cleanup — 진행 중 hint 타이머 정리.
-  useEffect(() => {
-    return () => {
-      if (hintTimerRef.current) clearTimeout(hintTimerRef.current);
-    };
-  }, []);
 
   const toggleSelectId = useCallback((id: number) => {
     setSelectedIds((prev) => {
@@ -211,58 +171,34 @@ export function NotificationPopup({
       return;
     }
 
-    // 타입별 독립 흐름. routeForNotificationType은 안전망(미래 타입)으로만.
-
+    // NOTICE: per-id 개별 읽음(미읽음일 때) + 본문 펼침/접힘. 팝업 유지 —
+    // 전체읽음으로 통일하지 않는 유일한 타입(사용자가 카드별로 본다). NOTICE
+    // 전체 읽음은 popup close 후 AppHeaderRight가 일괄 처리.
     if (n.type === "notice") {
-      // 카드 탭 즉시 그 알림만 개별 읽음(미읽음일 때) + 본문 펼침/접힘.
-      // 팝업은 유지 — 사용자가 다른 카드를 계속 본다. NOTICE 전체 읽음은
-      // popup close 후 일정시간 뒤(AppHeaderRight) 일괄 처리.
       if (!n.isRead) onNotificationRead(n.id);
       toggleExpand(n.id);
       return;
     }
 
-    if (n.type === "recipe_ready") {
-      // 이미 읽음 = "과거 추천" 알림. 현재 recommendedRecipes와 무관할
-      // 가능성이 커서 클릭에 반응 안 함.
-      if (n.isRead) return;
-      // 미읽음 + status가 "ready"여야만 이동. loading/idle/swiping/error면
-      // 이동 X — swipe 화면이 빈 결과를 보이거나 의도와 어긋남. 읽음 처리도
-      // 안 함(사용자가 결과를 아직 못 봤으므로).
-      if (recommendationStatus !== "ready") {
-        // 전역 Toast는 iOS fullScreen modal에 가려 안 보이므로 모달 내부
-        // pill로 안내. 사용자가 "왜 이동 안 되나" 헷갈리지 않게.
-        showHint(
-          recommendationStatus === "loading"
-            ? "아직 레시피를 만들고 있어요"
-            : "추천 레시피가 준비되지 않았어요",
-        );
-        return;
-      }
-      onClose();
-      router.push("/recipe-swipe" as never);
-      return;
+    // 그 외 타입: 단일 결정 함수 resolveNotificationAction으로 통일(세 경로 공통).
+    // 알림탭은 ready/already_read 가드를 swipe 화면(A-1)에 위임하므로
+    // isRecommendationReady=true, isRead=false로 공급 — RECIPE_READY는 읽음/상태
+    // 무관하게 항상 swipe로 보내고, 빈/로딩 안내는 swipe가 한다. RECIPE_READY
+    // 읽음도 swipe(결과 보여줄 때만)에 위임하므로 진입 시 markType은 스킵한다.
+    const action = resolveNotificationAction(n.type, {
+      isRead: false,
+      isRecommendationReady: true,
+    });
+    if (action.markType && action.markType !== "recipe_ready") {
+      onMarkTypeRead(action.markType);
     }
-
-    if (n.type === "expiry_soon") {
-      // 라우팅 + 즉시 markTypeRead. router.push("/")가 이미 냉장고 탭에
-      // 있을 때 transition을 안 만들어 useFocusEffect가 재발화 안 하는
-      // 케이스를 직접 해결. destination focus의 markTypeRead와 중복 호출돼도
-      // unread 0이면 no-op이라 안전.
-      onMarkTypeRead("expiry_soon");
+    if (action.route) {
       onClose();
-      router.push("/" as never);
-      return;
-    }
-
-    // 미래 타입 안전망 — routeForNotificationType에 위임.
-    const path = routeForNotificationType(n.type);
-    if (!path) {
+      router.push(action.route as never);
+    } else {
+      // 목적지 없는 미래 타입 — 본문 펼침으로 폴백.
       toggleExpand(n.id);
-      return;
     }
-    onClose();
-    router.push(path as never);
   };
 
   const renderFooter = () => {
@@ -466,25 +402,6 @@ export function NotificationPopup({
           ]}
           showsVerticalScrollIndicator={false}
         />
-
-        {/* 모달 내부 안내 pill — RECIPE_READY가 ready 아닐 때 표시.
-            pointerEvents="none"이라 리스트 탭 방해 X. 전역 Toast 시스템과
-            무관, 이 모달 내부 한정. */}
-        {hint !== null && (
-          <View
-            style={[
-              styles.hintWrap,
-              { bottom: Math.max(insets.bottom, 16) + 24 },
-            ]}
-            pointerEvents="none"
-          >
-            <View style={styles.hintPill}>
-              <Text style={styles.hintText} numberOfLines={2}>
-                {hint}
-              </Text>
-            </View>
-          </View>
-        )}
 
         {/* 일괄 삭제 확인 — 다중선택 모드의 "선택 N개 삭제" 탭 시 표시. */}
         <ConfirmModal
@@ -791,25 +708,4 @@ const styles = StyleSheet.create({
     color: Colors.onSurfaceVariant,
   },
 
-  // 모달 내부 안내 pill — 전역 Toast pill과 시각 비슷하게(어두운/primary,
-  // 흰 텍스트, 둥근 모서리) 하단 absolute 배치.
-  hintWrap: {
-    position: "absolute",
-    left: 0,
-    right: 0,
-    alignItems: "center",
-  },
-  hintPill: {
-    backgroundColor: Colors.primary,
-    paddingHorizontal: Spacing.lg,
-    paddingVertical: Spacing.md + 2,
-    borderRadius: Radius.xl,
-    marginHorizontal: Spacing.lg,
-  },
-  hintText: {
-    fontSize: FontSize.bodyMd,
-    fontWeight: FontWeight.semiBold,
-    color: Colors.onPrimary,
-    textAlign: "center",
-  },
 });

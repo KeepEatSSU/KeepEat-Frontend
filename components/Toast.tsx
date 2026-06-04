@@ -49,7 +49,11 @@ import { Portal } from "@gorhom/portal";
 
 interface ToastContextValue {
   showToast: (message: string) => void;
-  showNotification: (message: string, onTap?: () => void) => void;
+  showNotification: (
+    message: string,
+    onTap?: () => void,
+    title?: string,
+  ) => void;
 }
 
 const ToastContext = createContext<ToastContextValue>({
@@ -70,6 +74,8 @@ interface ToastData {
   message: string;
   type: "toast" | "notification";
   onTap?: () => void;
+  /** 드롭다운(notification) 제목 줄. 없으면 "KeepEat"로 fallback. */
+  title?: string;
 }
 
 export function ToastProvider({ children }: { children: React.ReactNode }) {
@@ -133,8 +139,8 @@ export function ToastProvider({ children }: { children: React.ReactNode }) {
   );
 
   const showNotification = useCallback(
-    (message: string, onTap?: () => void) =>
-      show({ message, type: "notification", onTap }),
+    (message: string, onTap?: () => void, title?: string) =>
+      show({ message, type: "notification", onTap, title }),
     [show],
   );
 
@@ -159,6 +165,7 @@ export function ToastProvider({ children }: { children: React.ReactNode }) {
         {showNotif && data && (
           <NotificationView
             message={data.message}
+            title={data.title}
             opacity={opacity}
             translateY={translateY}
             onTap={() => {
@@ -214,11 +221,14 @@ function ToastView({
 
 function NotificationView({
   message,
+  title,
   opacity,
   translateY,
   onTap,
 }: {
   message: string;
+  /** 제목 줄. 없으면 브랜드 라벨 "KeepEat"로 fallback. */
+  title?: string;
   opacity: Animated.Value;
   translateY: Animated.Value;
   onTap: () => void;
@@ -238,7 +248,7 @@ function NotificationView({
             <Ionicons name="restaurant" size={18} color={Colors.primary} />
           </View>
           <View style={styles.notifTextWrap}>
-            <Text style={styles.notifTitle}>KeepEat</Text>
+            <Text style={styles.notifTitle}>{title ?? "KeepEat"}</Text>
             <Text style={styles.notifBody} numberOfLines={2}>
               {message}
             </Text>

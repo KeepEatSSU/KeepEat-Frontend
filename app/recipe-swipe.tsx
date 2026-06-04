@@ -18,6 +18,7 @@ import { Ionicons } from "@expo/vector-icons";
 import { useFocusEffect, useNavigation, useRouter } from "expo-router";
 import { useCallback, useEffect, useRef, useState } from "react";
 import {
+  ActivityIndicator,
   BackHandler,
   Dimensions,
   type LayoutChangeEvent,
@@ -395,7 +396,7 @@ function CompletionView({
             color={Colors.outlineVariant}
           />
           <Text style={styles.completionTitle}>
-            아쉽네요!{"\n"}다시 추천받아 보시겠어요?
+            저장한 레시피가 없어요
           </Text>
           <Pressable
             onPress={onRetry}
@@ -404,10 +405,44 @@ function CompletionView({
               pressed && { opacity: 0.85 },
             ]}
           >
-            <Text style={styles.completionBtnText}>다시 추천받기</Text>
+            <Text style={styles.completionBtnText}>내 레시피</Text>
           </Pressable>
         </>
       )}
+    </View>
+  );
+}
+
+// ─── No-results / loading helpers ────────────────────────────────────────────
+
+// 콜드스타트로 swipe에 진입하면 RecipeRecommendationContext의 AsyncStorage 추천
+// 복원이 아직 안 끝나 status는 idle, 덱은 빈 한순간이 있다. 이 grace 동안은
+// "결과 없음" 대신 로딩으로 취급해 거짓 빈 화면 깜빡임을 막는다. 캐시가 있으면
+// 이 안에 덱이 채워지고, 없으면 grace 경과 후 "결과 없음" 안내로 넘어간다.
+// (복원 중에도 status는 계속 idle이라 status만으로는 '복원 대기'와 '캐시 없음'을
+// 구분 못 해 시간 게이트가 필요하다.)
+const RESTORE_SETTLE_GRACE_MS = 1000;
+
+// 결과가 휘발(앱 종료 / 24h TTL 만료 / 콜드스타트 미복원)했는데 swipe로 진입한
+// 경우의 안내. 스와이프를 다 끝낸 CompletionView("아쉽네요!")와 구분 — 여긴 애초에
+// 보여줄 결과가 없던 상태다. R2(서버 '마지막 추천 결과 조회 GET')가 도입되면 이
+// 자리에서 서버 fetch로 결과를 복원해 바로 덱으로 보낼 수 있다.
+function NoResultsView({ onRetry }: { onRetry: () => void }) {
+  return (
+    <View style={styles.completionArea}>
+      <Ionicons name="time-outline" size={64} color={Colors.outlineVariant} />
+      <Text style={styles.completionTitle}>
+        추천 결과를 불러올 수 없어요
+      </Text>
+      <Pressable
+        onPress={onRetry}
+        style={({ pressed }) => [
+          styles.completionBtn,
+          pressed && { opacity: 0.85 },
+        ]}
+      >
+        <Text style={styles.completionBtnText}>내 레시피</Text>
+      </Pressable>
     </View>
   );
 }
@@ -420,6 +455,7 @@ export default function RecipeSwipeScreen() {
   const insets = useSafeAreaInsets();
   const { showToast } = useToast();
   const {
+    status: recommendationStatus,
     recommendedRecipes,
     rawRecipes,
     savedRecipes,
@@ -454,20 +490,47 @@ export default function RecipeSwipeScreen() {
     }
   }, [showToast]);
 
-  // Entering the swipe screen marks RECIPE_READY notifications as read —
-  // the spec maps that type's "진입 시 읽음" to this screen specifically,
-  // not the recipe tab.
+  // 결과를 실제로 보여줄 때만 RECIPE_READY 읽음 처리 — 빈 안내/로딩만 뜨는
+  // 경우(결과 휘발/콜드스타트 미복원)는 보류해 "결과를 못 봤는데 읽음됨" 모순을
+  // 없앤다. recommendedRecipes.length 의존이라 콜드스타트로 덱이 뒤늦게 복원돼도
+  // (0→N) 그 시점에 한 번 발화한다. markTypeRead는 서버에서 멱등이라 안전.
   useFocusEffect(
     useCallback(() => {
-      markTypeRead("recipe_ready");
-    }, [markTypeRead]),
+      if (recommendedRecipes.length > 0) {
+        markTypeRead("recipe_ready");
+      }
+    }, [recommendedRecipes.length, markTypeRead]),
   );
 
   const [currentIndex, setCurrentIndex] = useState(0);
   const [exitModalVisible, setExitModalVisible] = useState(false);
+  // 콜드스타트 복원 grace 경과 플래그. 경과 전 빈 덱은 로딩으로 취급(깜빡임 방지),
+  // 경과 후에도 비어 있으면 "결과 없음"으로 확정.
+  const [settleElapsed, setSettleElapsed] = useState(false);
+  useEffect(() => {
+    const t = setTimeout(() => setSettleElapsed(true), RESTORE_SETTLE_GRACE_MS);
+    return () => clearTimeout(t);
+  }, []);
 
   const isComplete = currentIndex >= recommendedRecipes.length;
   const remaining = recommendedRecipes.length - currentIndex;
+
+  // 화면 상태 결정 (status-aware):
+  //  • 덱 있음 → 다 봤으면 completed, 아니면 deck
+  //  • 덱 없음 → 복원이 정착(ready/swiping)했거나 grace 경과면 no-results,
+  //             아니면 loading(콜드스타트 복원 대기)
+  const hasDeck = recommendedRecipes.length > 0;
+  const settled =
+    recommendationStatus === "ready" ||
+    recommendationStatus === "swiping" ||
+    settleElapsed;
+  const viewState: "loading" | "deck" | "completed" | "no-results" = hasDeck
+    ? isComplete
+      ? "completed"
+      : "deck"
+    : settled
+      ? "no-results"
+      : "loading";
 
   // Android back button intercept
   useEffect(() => {
@@ -556,7 +619,13 @@ export default function RecipeSwipeScreen() {
         <View style={{ width: 44 }} />
       </View>
 
-      {isComplete ? (
+      {viewState === "loading" ? (
+        <View style={styles.completionArea}>
+          <ActivityIndicator size="large" color={Colors.primary} />
+        </View>
+      ) : viewState === "no-results" ? (
+        <NoResultsView onRetry={handleRetry} />
+      ) : viewState === "completed" ? (
         <CompletionView
           savedCount={savedRecipes.length}
           onConfirm={handleComplete}

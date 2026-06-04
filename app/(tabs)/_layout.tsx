@@ -15,6 +15,7 @@ import { Tabs, useRouter } from "expo-router";
 import { useState } from "react";
 import { Alert, Platform, Pressable, StyleSheet, Text, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
+import { useNotifications } from "@/context/NotificationContext";
 
 // ─── Custom Floating Tab Bar ──────────────────────────────────────────────────
 
@@ -133,6 +134,9 @@ function FloatingTabBar({
 export default function TabLayout() {
   const [isAddMenuVisible, setIsAddMenuVisible] = useState(false);
   const router = useRouter();
+  // 탭 전환 시 배지만 경량 갱신. throttle은 context 안에 내장 — 연타/초기
+  // 마운트 focus는 5초 내 1회로 흡수되고, AppState 복귀와 같은 ref를 공유.
+  const { maybeRefreshUnreadCount } = useNotifications();
 
   return (
     <>
@@ -144,6 +148,11 @@ export default function TabLayout() {
           />
         )}
         screenOptions={{ headerShown: false }}
+        screenListeners={{
+          focus: () => {
+            maybeRefreshUnreadCount();
+          },
+        }}
       >
         <Tabs.Screen name="index" />
         <Tabs.Screen name="explore" />

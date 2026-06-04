@@ -159,14 +159,19 @@ export async function deletePushToken(token: string): Promise<void> {
   await api.delete("/api/notifications/token", { data: { token } });
 }
 
-// ─── Unread count (future) ───────────────────────────────────────────────────
-// Page-1 derivation (`notifications.filter(!isRead).length`) drives the bell
-// badge today — accurate enough since unread is usually clustered at the top.
-// If we later need a server-truth count (e.g. >20 unread, or syncing across
-// tabs), add:
-//
-//   interface UnreadCountResponse { unreadCount: number }  ← camelCase wrapper, NOT a bare number
-//   export async function fetchUnreadCount(): Promise<number> {
-//     const { data } = await api.get<UnreadCountResponse>("/api/notifications/unread-count");
-//     return data.unreadCount;
-//   }
+// ─── Unread count ────────────────────────────────────────────────────────────
+// 종 아이콘 배지의 server-truth. 페이지-1 derivation을 대체해 ① 페이지-2 이상의
+// unread도 정확히 잡고 ② 다른 디바이스/시점의 변화도 GET 호출만으로 반영.
+// 응답은 `{ unreadCount: number }` 단일 필드 — 백엔드가 Map<String, Long>으로
+// 직렬화해 Swagger에 additionalProp으로 보이지만 실 키는 unreadCount 하나뿐.
+
+interface UnreadCountResponse {
+  unreadCount: number;
+}
+
+export async function fetchUnreadCount(): Promise<number> {
+  const { data } = await api.get<UnreadCountResponse>(
+    "/api/notifications/unread-count",
+  );
+  return data.unreadCount;
+}

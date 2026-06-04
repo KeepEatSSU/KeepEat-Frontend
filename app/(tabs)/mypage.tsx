@@ -1,10 +1,9 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useState } from "react";
 import {
   Linking,
   View,
   Text,
   Pressable,
-  Switch,
   ScrollView,
   StyleSheet,
 } from "react-native";
@@ -16,7 +15,8 @@ import { useAuth } from "@/context/AuthContext";
 import { useToast } from "@/components/Toast";
 import { ConfirmModal } from "@/components/ConfirmModal";
 import { DeletePasswordModal } from "@/components/DeletePasswordModal";
-import { getErrorMessage, updateNotificationSetting } from "@/services/api";
+import { getErrorMessage } from "@/services/api";
+import { syncPushTokenWithServer } from "@/services/pushNotifications";
 import { clearRecentIngredients } from "@/services/recentIngredients";
 import {
   Colors,
@@ -29,30 +29,20 @@ import {
 const SHOW_DELETE_ACCOUNT = true;
 
 export default function MyPageScreen() {
-  const { user, logout, deleteAccount, setUserNotificationEnabled } = useAuth();
+  const { user, logout, deleteAccount } = useAuth();
   const { showToast } = useToast();
   const router = useRouter();
 
-  // 푸시 토글 상태 (서버 known + 낙관적 토글)
-  const [pushOn, setPushOn] = useState(user?.isNotificationEnabled ?? true);
-  const [toggling, setToggling] = useState(false);
-  // OS 권한 거부 상태에서 ON 시도 시 띄우는 안내 모달.
-  const [permissionModalVisible, setPermissionModalVisible] = useState(false);
-  // 서버 setting은 ON인데 OS는 막혀 있는 미스매치를 보조 경고 행으로 시각화.
-  // 토글 자체 값은 절대 바꾸지 않는다.
+  // 알림 행은 OS 권한의 거울 — 서버 isNotificationEnabled flag는 제어하지 않는다
+  // (백엔드 기본 true 방치, 종/알림창 히스토리는 권한 무관 항상 저장. 푸시 송신만
+  // OS 권한이 통제). 앱이 권한을 코드로 끌 수 없으므로 행은 "상태 표시 + 설정 앱
+  // 바로가기" 역할만. 매 focus마다 아래 useFocusEffect가 권한을 재확인해 갱신.
   const [osPermDenied, setOsPermDenied] = useState(false);
 
   // 탈퇴 흐름 — LOCAL은 비번 모달, GOOGLE은 단순 확인 모달.
   const [googleConfirmVisible, setGoogleConfirmVisible] = useState(false);
   const [passwordModalVisible, setPasswordModalVisible] = useState(false);
   const [deleteSubmitting, setDeleteSubmitting] = useState(false);
-
-  // 서버 known 값 변경(재로그인, 다른 화면에서 토글) 시 동기화.
-  useEffect(() => {
-    if (user) {
-      setPushOn(user.isNotificationEnabled);
-    }
-  }, [user?.isNotificationEnabled, user]);
 
   // 탭 진입 / 백그라운드에서 OS 설정 바꾸고 복귀하는 경로 모두 잡기 위해
   // useFocusEffect로 매 focus마다 OS 권한 재확인.
@@ -86,66 +76,38 @@ export default function MyPageScreen() {
   const emailLocalPart = email.includes("@") ? email.split("@")[0] : email;
   const displayName = user?.nickname?.trim() || emailLocalPart;
 
-  const handleTogglePush = async () => {
-    if (toggling) return;
-    const next = !pushOn;
-
-    // ON 시도 시점에만 OS 권한 체크. OFF는 OS 권한과 무관(서버에서만 끔).
-    if (next) {
-      try {
-        const current = await Notifications.getPermissionsAsync();
-        if (current.status !== "granted") {
-          if (current.status === "undetermined" || current.canAskAgain) {
-            const requested = await Notifications.requestPermissionsAsync();
-            if (requested.status !== "granted") {
-              setPermissionModalVisible(true);
-              return;
-            }
-          } else {
-            setPermissionModalVisible(true);
-            return;
-          }
-        }
-      } catch {
-        // 권한 API 자체가 없는 환경 — 기존 서버 토글 동작으로 폴백.
-      }
-    }
-
-    setPushOn(next);
-    setToggling(true);
-    try {
-      await updateNotificationSetting();
-      setUserNotificationEnabled(next);
-    } catch (e) {
-      setPushOn(!next);
-      showToast(
-        getErrorMessage(
-          e,
-          "알림 설정 변경에 실패했어요. 잠시 후 다시 시도해주세요",
-        ),
-      );
-    } finally {
-      setToggling(false);
-    }
-  };
-
-  const handleOpenSettings = async () => {
-    setPermissionModalVisible(false);
-    try {
-      const current = await Notifications.getPermissionsAsync();
-      if (current.status === "undetermined") {
-        const requested = await Notifications.requestPermissionsAsync();
-        if (requested.status === "granted") {
-          setOsPermDenied(false);
-        }
-        return;
-      }
-    } catch {
-      // 권한 API 없는 환경 — 그냥 설정 앱 시도로 폴백.
-    }
+  const openOsSettings = () => {
     Linking.openSettings().catch(() => {
       showToast("설정 앱을 열 수 없어요");
     });
+  };
+
+  // 알림 행 누름 — OS 권한 상태로 분기. 서버 flag(updateNotificationSetting)는
+  // 더 이상 건드리지 않는다.
+  //   • granted   → 끄려는 의도. 앱은 권한 회수 불가 → OS 설정 앱으로 보냄.
+  //   • undetermined / canAskAgain → 첫 요청. 그 자리서 OS 권한 팝업 → 결과로
+  //     osPermDenied 갱신. granted 되면 토큰 발급/등록까지 이어줌
+  //     (로그인 시엔 권한이 없어 토큰을 못 받았을 수 있으므로 여기서 새로 sync).
+  //   • 거부 확정(canAskAgain false) → 설정 앱으로.
+  const handleNotificationRowPress = async () => {
+    try {
+      const current = await Notifications.getPermissionsAsync();
+      if (current.status === "granted") {
+        openOsSettings();
+        return;
+      }
+      if (current.status === "undetermined" || current.canAskAgain) {
+        const requested = await Notifications.requestPermissionsAsync();
+        const granted = requested.status === "granted";
+        setOsPermDenied(!granted);
+        if (granted) syncPushTokenWithServer();
+        return;
+      }
+      openOsSettings();
+    } catch {
+      // 권한 API 없는 환경(웹 등) — 설정 앱 시도로 폴백.
+      openOsSettings();
+    }
   };
 
   const handleLogout = async () => {
@@ -242,36 +204,35 @@ export default function MyPageScreen() {
 
         {/* 설정 카드 */}
         <View style={styles.card}>
-          <View style={styles.settingRow}>
-            <Text style={styles.settingLabel}>푸시 알림 받기</Text>
-            <Switch
-              value={pushOn}
-              onValueChange={handleTogglePush}
-              disabled={toggling}
-              trackColor={{
-                false: Colors.surfaceContainerHigh,
-                true: Colors.primary,
-              }}
-              thumbColor={Colors.surfaceContainerLowest}
-              ios_backgroundColor={Colors.surfaceContainerHigh}
-            />
-          </View>
-
-          {/* OS 권한 미스매치 보조 경고. OFF거나 OS granted면 숨김. */}
-          {pushOn && osPermDenied && (
-            <View style={styles.permWarnRow}>
-              <Text style={styles.permWarnText}>기기 알림이 꺼져 있어요</Text>
-              <Pressable
-                onPress={handleOpenSettings}
-                accessibilityRole="link"
-                accessibilityLabel="기기 알림 설정 열기"
-                hitSlop={8}
-                style={({ pressed }) => [pressed && { opacity: 0.5 }]}
+          {/* 기기 알림 — OS 권한 거울. 누르면 권한 상태에 따라 OS 팝업/설정 앱.
+              비밀번호 변경 행과 같은 menuRow 시각 패턴으로 일관성 유지. */}
+          <Pressable
+            onPress={handleNotificationRowPress}
+            accessibilityRole="button"
+            accessibilityLabel={
+              osPermDenied
+                ? "기기 알림 꺼짐, 눌러서 설정 열기"
+                : "기기 알림 켜짐, 눌러서 설정 열기"
+            }
+            style={({ pressed }) => [
+              styles.menuRow,
+              pressed && { opacity: 0.6 },
+            ]}
+          >
+            <Text style={styles.menuLabel}>기기 알림</Text>
+            <View style={styles.menuRight}>
+              <Text
+                style={[styles.menuValue, osPermDenied && styles.menuValueOff]}
               >
-                <Text style={styles.permWarnLink}>설정</Text>
-              </Pressable>
+                {osPermDenied ? "꺼짐" : "켜짐"}
+              </Text>
+              <Ionicons
+                name="chevron-forward"
+                size={16}
+                color={Colors.outline}
+              />
             </View>
-          )}
+          </Pressable>
 
           {/* 비밀번호 변경 — LOCAL 계정만. 소셜은 서버측 패스워드가 placeholder. */}
           {!isGoogleAccount && (
@@ -319,18 +280,6 @@ export default function MyPageScreen() {
           </Pressable>
         )}
       </ScrollView>
-
-      <ConfirmModal
-        visible={permissionModalVisible}
-        title="알림 권한이 꺼져 있어요"
-        subtitle={
-          "기기 설정에서 알림을 허용하면\n소비기한 임박과 레시피 완성 알림을 받을 수 있어요"
-        }
-        confirmLabel="설정으로 이동"
-        cancelLabel="닫기"
-        onConfirm={handleOpenSettings}
-        onCancel={() => setPermissionModalVisible(false)}
-      />
 
       <ConfirmModal
         visible={googleConfirmVisible}
@@ -419,35 +368,19 @@ const styles = StyleSheet.create({
     width: "100%",
     marginVertical: Spacing.sm,
   },
-  settingRow: {
-    width: "100%",
+  // 알림 행 우측 — 상태 텍스트(켜짐/꺼짐) + chevron 묶음.
+  menuRight: {
     flexDirection: "row",
     alignItems: "center",
-    justifyContent: "space-between",
-    paddingVertical: Spacing.xs,
+    gap: Spacing.xs,
   },
-  settingLabel: {
-    fontSize: FontSize.bodyMd,
-    fontWeight: FontWeight.medium,
-    color: Colors.onSurface,
-  },
-  permWarnRow: {
-    width: "100%",
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "space-between",
-    paddingTop: Spacing.sm,
-  },
-  permWarnText: {
-    fontSize: FontSize.labelSm,
-    fontWeight: FontWeight.medium,
-    color: Colors.onSurfaceVariant,
-  },
-  permWarnLink: {
-    fontSize: FontSize.labelSm,
+  menuValue: {
+    fontSize: FontSize.labelMd,
     fontWeight: FontWeight.semiBold,
     color: Colors.primary,
-    textDecorationLine: "underline",
+  },
+  menuValueOff: {
+    color: Colors.outline,
   },
   menuRow: {
     width: "100%",
