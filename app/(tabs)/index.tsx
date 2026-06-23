@@ -28,6 +28,7 @@ import {
   searchIngredients,
 } from "@/services/userIngredients";
 import { getErrorMessage } from "@/services/api";
+import { useIngredientMaster } from "@/context/IngredientMasterContext";
 import { useNotifications } from "@/context/NotificationContext";
 import { getDDayBadgeColor, getDDayInfo } from "@/utils/dateUtils";
 import { Ionicons } from "@expo/vector-icons";
@@ -274,6 +275,7 @@ export default function FridgeScreen() {
   const insets = useSafeAreaInsets();
   const { showToast } = useToast();
   const { markTypeRead } = useNotifications();
+  const { snapshot } = useIngredientMaster();
 
   // ── Async data state ──
   // `ingredients` = full fridge (refetched on focus). `searchResults` is the
@@ -302,6 +304,7 @@ export default function FridgeScreen() {
   const [selectMode, setSelectMode] = useState(false);
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const searchInputRef = useRef<TextInput>(null);
+  const hasLoadedOnceRef = useRef(false);
 
   const handleOpenSearch = () => {
     setSearchOpen(true);
@@ -345,6 +348,24 @@ export default function FridgeScreen() {
     setSelectedIds(new Set([id]));
     Keyboard.dismiss();
   };
+
+  const fetchFridgeData = useCallback(
+    async (opts: { silent?: boolean } = {}) => {
+      if (!opts.silent && !hasLoadedOnceRef.current) setIsLoading(true);
+      try {
+        const data = await fetchAllIngredients(snapshot);
+        setIngredients(data);
+        setError(null);
+      } catch (e) {
+        setError(e);
+      } finally {
+        setIsLoading(false);
+        hasLoadedOnceRef.current = true;
+        setHasLoadedOnce(true);
+      }
+    },
+    [snapshot],
+  );
 
   const handleClearSelected = async () => {
     if (selectedIds.size === 0) return;
@@ -491,27 +512,12 @@ export default function FridgeScreen() {
       });
   }, [displayedIngredients, selectedFilter, selectedCategories]);
 
-  async function fetchFridgeData(opts: { silent?: boolean } = {}) {
-    if (!opts.silent && !hasLoadedOnce) setIsLoading(true);
-    try {
-      const data = await fetchAllIngredients();
-      setIngredients(data);
-      setError(null);
-    } catch (e) {
-      setError(e);
-    } finally {
-      setIsLoading(false);
-      setHasLoadedOnce(true);
-    }
-  }
-
   // Refetch every time the home tab is focused (covers post-add, post-edit,
   // post-delete flows without a separate event bus).
   useFocusEffect(
     useCallback(() => {
-      fetchFridgeData({ silent: hasLoadedOnce });
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, []),
+      fetchFridgeData();
+    }, [fetchFridgeData]),
   );
 
   // Entering the home tab marks the home-targeted notification type as
@@ -534,7 +540,7 @@ export default function FridgeScreen() {
     let cancelled = false;
     const handle = setTimeout(async () => {
       try {
-        const hits = await searchIngredients(trimmed);
+        const hits = await searchIngredients(trimmed, snapshot);
         if (!cancelled) setSearchResults(hits);
       } catch {
         // Keep prior results on transient failure — interceptor logs the error.
@@ -544,7 +550,7 @@ export default function FridgeScreen() {
       cancelled = true;
       clearTimeout(handle);
     };
-  }, [searchQuery]);
+  }, [searchQuery, snapshot]);
 
   // Show the dedicated error page only when we have nothing to display —
   // a refetch failure on top of an existing list shouldn't blank out the UI.

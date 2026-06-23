@@ -42,7 +42,7 @@ import {
   getOwnedIngredientsByRecipe,
   mapIngredientToCreateRequest,
 } from "@/services/userIngredients";
-import { getMasterSnapshot } from "@/services/ingredientMaster";
+import { useIngredientMaster } from "@/context/IngredientMasterContext";
 import { IngredientEditCard } from "@/components/IngredientEditCard";
 import { ConfirmModal } from "@/components/ConfirmModal";
 import { useToast } from "@/components/Toast";
@@ -285,6 +285,7 @@ export default function RecipeDetailScreen() {
   const router = useRouter();
   const insets = useSafeAreaInsets();
   const { showToast } = useToast();
+  const { snapshot } = useIngredientMaster();
   const { id } = useLocalSearchParams<{ id: string }>();
 
   const [recipe, setRecipe] = useState<MappedRecipeDetail | null>(null);
@@ -369,7 +370,7 @@ export default function RecipeDetailScreen() {
     // in the catalog, register the new fridge entry as that master so it
     // gets an icon + storage defaults + appears under the right category.
     // No match → falls through as a custom ("내 재료") item.
-    const masterId = getMasterSnapshot().byName.get(ingredientName)?.id;
+    const masterId = snapshot?.byName.get(ingredientName)?.id;
     setDraftItem({
       id: String(Date.now()),
       name: ingredientName,

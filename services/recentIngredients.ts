@@ -11,12 +11,14 @@
  */
 
 import AsyncStorage from "@react-native-async-storage/async-storage";
-import type { IngredientMasterEntry } from "@/constants/ingredients-master";
 
 const STORAGE_KEY = "keepeat:recentIngredients";
 const MAX_RECENTS = 10;
 
-export type RecentEntry = Pick<IngredientMasterEntry, "id" | "name">;
+export type RecentEntry = {
+  id: number;
+  name: string;
+};
 
 export async function getRecentIngredients(): Promise<RecentEntry[]> {
   try {

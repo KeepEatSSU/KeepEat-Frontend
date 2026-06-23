@@ -14,7 +14,7 @@ import {
 } from "@/constants/theme";
 import type { IngredientDraft } from "@/constants/domain";
 import { METRIC_TO_DAYS } from "@/constants/ingredients-master";
-import { getMasterSnapshot } from "@/services/ingredientMaster";
+import { useIngredientMaster } from "@/context/IngredientMasterContext";
 import {
   createIngredients,
   mapIngredientToCreateRequest,
@@ -56,6 +56,7 @@ export default function AddConfirmScreen() {
   const navigation = useNavigation();
   const insets = useSafeAreaInsets();
   const { showToast } = useToast();
+  const { snapshot } = useIngredientMaster();
   const { mode } = useLocalSearchParams<{ mode?: string }>();
 
   const isManual = mode === "manual";
@@ -184,7 +185,7 @@ export default function AddConfirmScreen() {
     // deliberately. When auto-filling, also seed the expiry from the master's
     // (min+max)/2 days for that storage.
     const options =
-      getMasterSnapshot().optionsByIngredientId.get(entry.id) ?? [];
+      snapshot?.optionsByIngredientId.get(entry.id) ?? [];
     const uniqueDomains = Array.from(
       new Set(options.map((o) => mapStorageTypeFromApi(o.storageType))),
     );

@@ -31,7 +31,7 @@ import {
   type ApiStorageType,
   type StorageOptionEntry,
 } from "@/constants/ingredients-master";
-import { getMasterSnapshot } from "@/services/ingredientMaster";
+import { useIngredientMaster } from "@/context/IngredientMasterContext";
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -64,6 +64,7 @@ export function IngredientEditCard({
   onCategoryPress,
   hideDelete = false,
 }: IngredientEditCardProps) {
+  const { snapshot } = useIngredientMaster();
   const hasError = item.quantity === null || item.quantity <= 0;
   const [infoOpen, setInfoOpen] = useState(false);
   // OCR can return UNMATCHED items (rawName filled, no master link). The
@@ -80,8 +81,8 @@ export function IngredientEditCard({
   // Master storage options for the currently picked ingredient (if any).
   const masterOptions = useMemo<StorageOptionEntry[] | undefined>(() => {
     if (item.ingredientId == null) return undefined;
-    return getMasterSnapshot().optionsByIngredientId.get(item.ingredientId);
-  }, [item.ingredientId]);
+    return snapshot?.optionsByIngredientId.get(item.ingredientId);
+  }, [item.ingredientId, snapshot]);
 
   // Whether the quick-expiry chips will actually render. Mirrors
   // QuickExpiryPicker's internal `match` check so we can decide whether to
@@ -90,11 +91,11 @@ export function IngredientEditCard({
     const { isCustom, ingredientId, storage } = item;
     if (isCustom) return false;
     if (ingredientId == null || storage == null) return false;
-    const opts = getMasterSnapshot().optionsByIngredientId.get(ingredientId);
+    const opts = snapshot?.optionsByIngredientId.get(ingredientId);
     if (!opts) return false;
     const apiStorage = STORAGE_DOMAIN_TO_API[storage];
     return opts.some((o) => o.storageType === apiStorage);
-  }, [item.isCustom, item.ingredientId, item.storage]);
+  }, [item.isCustom, item.ingredientId, item.storage, snapshot]);
 
   const storageHasOption = (storage: StorageType): boolean => {
     if (!masterOptions) return true; // unknown master → don't restrict
@@ -113,7 +114,7 @@ export function IngredientEditCard({
     const autoExpiry = (() => {
       if (item.expirationManuallySet) return undefined;
       if (item.ingredientId == null) return undefined;
-      const options = getMasterSnapshot().optionsByIngredientId.get(item.ingredientId);
+      const options = snapshot?.optionsByIngredientId.get(item.ingredientId);
       if (!options) return undefined;
       const opt = options.find(
         (o) => o.storageType === STORAGE_DOMAIN_TO_API[newStorage],

@@ -23,11 +23,7 @@ import {
   Radius,
   LetterSpacing,
 } from "@/constants/theme";
-import {
-  type CategoryEntry,
-  type IngredientMasterEntry,
-} from "@/constants/ingredients-master";
-import { getMasterSnapshot } from "@/services/ingredientMaster";
+import { useIngredientMaster } from "@/context/IngredientMasterContext";
 import { IngredientIcon } from "@/components/IngredientIcon";
 import {
   getRecentIngredients,
@@ -36,6 +32,9 @@ import {
 } from "@/services/recentIngredients";
 
 const MAX_RESULTS = 50;
+
+type PickerCategory = { id: number; name: string };
+type PickerIngredient = { id: number; subCategoryId: number; name: string };
 
 interface IngredientPickerSheetProps {
   visible: boolean;
@@ -59,50 +58,50 @@ export function IngredientPickerSheet({
   initialQuery,
 }: IngredientPickerSheetProps) {
   const insets = useSafeAreaInsets();
+  const { snapshot } = useIngredientMaster();
   const [search, setSearch] = useState("");
   const [recents, setRecents] = useState<RecentEntry[]>([]);
   // Stage-3 anchor: when set, the placeholder category modal is open and
   // will eventually host the per-category ingredient grid.
-  const [activeCategory, setActiveCategory] = useState<CategoryEntry | null>(
+  const [activeCategory, setActiveCategory] = useState<PickerCategory | null>(
     null,
   );
   const inputRef = useRef<TextInput>(null);
 
   // Master categories (10 of them) for the right pane grid.
-  const categories = useMemo<CategoryEntry[]>(
-    () => getMasterSnapshot().categories,
-    [],
+  const categories = useMemo<PickerCategory[]>(
+    () => snapshot?.categories ?? [],
+    [snapshot],
   );
 
   // Representative thumbnail per category — the smallest-id ingredient in
   // that category (ingredients link to subCategory which links to category,
-  // so we walk via a sub→cat index). Built once per mount; the snapshot
-  // doesn't mutate during a picker session.
+  // so we walk via a sub→cat index).
   const categoryIconIds = useMemo<Map<number, number>>(() => {
-    const snap = getMasterSnapshot();
+    if (!snapshot) return new Map();
     const subToCat = new Map<number, number>();
-    for (const sc of snap.subCategories) subToCat.set(sc.id, sc.categoryId);
+    for (const sc of snapshot.subCategories) subToCat.set(sc.id, sc.categoryId);
     const minByCat = new Map<number, number>();
-    for (const ing of snap.ingredients) {
+    for (const ing of snapshot.ingredients) {
       const catId = subToCat.get(ing.subCategoryId);
       if (catId == null) continue;
       const cur = minByCat.get(catId);
       if (cur == null || ing.id < cur) minByCat.set(catId, ing.id);
     }
     return minByCat;
-  }, []);
+  }, [snapshot]);
 
   // Full ingredient list per category — drives the modal's per-category
   // grid. Same sub→cat traversal as `categoryIconIds`; each bucket sorted
   // by ingredient id so the grid order stays stable across launches.
   const ingredientsByCategory = useMemo<
-    Map<number, IngredientMasterEntry[]>
+    Map<number, PickerIngredient[]>
   >(() => {
-    const snap = getMasterSnapshot();
+    if (!snapshot) return new Map();
     const subToCat = new Map<number, number>();
-    for (const sc of snap.subCategories) subToCat.set(sc.id, sc.categoryId);
-    const map = new Map<number, IngredientMasterEntry[]>();
-    for (const ing of snap.ingredients) {
+    for (const sc of snapshot.subCategories) subToCat.set(sc.id, sc.categoryId);
+    const map = new Map<number, PickerIngredient[]>();
+    for (const ing of snapshot.ingredients) {
       const catId = subToCat.get(ing.subCategoryId);
       if (catId == null) continue;
       let arr = map.get(catId);
@@ -114,7 +113,7 @@ export function IngredientPickerSheet({
     }
     for (const arr of map.values()) arr.sort((a, b) => a.id - b.id);
     return map;
-  }, []);
+  }, [snapshot]);
 
   // Prefill query + reload recents whenever the sheet opens. The query is
   // seeded from `initialQuery` (e.g. the calling card's current name) so an
@@ -132,7 +131,7 @@ export function IngredientPickerSheet({
   }, [visible, initialQuery]);
 
   const handlePick = useCallback(
-    (entry: IngredientMasterEntry | RecentEntry) => {
+    (entry: PickerIngredient | RecentEntry) => {
       const payload = { id: entry.id, name: entry.name };
       // Persist to recents asynchronously; UX should not block on storage.
       pushRecentIngredient(payload).catch(() => {});
@@ -161,18 +160,18 @@ export function IngredientPickerSheet({
 
   // Substring match against the full master. ~613 entries is fine to scan on
   // every keystroke; we cap the rendered results at MAX_RESULTS.
-  const searchResults = useMemo<IngredientMasterEntry[]>(() => {
-    if (trimmed === "") return [];
+  const searchResults = useMemo<PickerIngredient[]>(() => {
+    if (trimmed === "" || !snapshot) return [];
     const q = trimmed.toLowerCase();
-    const hits: IngredientMasterEntry[] = [];
-    for (const entry of getMasterSnapshot().ingredients) {
+    const hits: PickerIngredient[] = [];
+    for (const entry of snapshot.ingredients) {
       if (entry.name.toLowerCase().includes(q)) {
         hits.push(entry);
         if (hits.length >= MAX_RESULTS) break;
       }
     }
     return hits;
-  }, [trimmed]);
+  }, [trimmed, snapshot]);
 
   return (
     <Modal
@@ -424,11 +423,11 @@ function CategoryGridModal({
   onClose,
   insets,
 }: {
-  activeCategory: CategoryEntry;
-  categories: CategoryEntry[];
-  ingredientsByCategory: Map<number, IngredientMasterEntry[]>;
-  onChangeCategory: (cat: CategoryEntry) => void;
-  onPickIngredient: (ing: IngredientMasterEntry) => void;
+  activeCategory: PickerCategory;
+  categories: PickerCategory[];
+  ingredientsByCategory: Map<number, PickerIngredient[]>;
+  onChangeCategory: (cat: PickerCategory) => void;
+  onPickIngredient: (ing: PickerIngredient) => void;
   onClose: () => void;
   insets: { top: number; bottom: number; left: number; right: number };
 }) {

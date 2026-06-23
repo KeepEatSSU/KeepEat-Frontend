@@ -43,7 +43,7 @@ import {
   type IngredientUpdate,
 } from "@/services/userIngredients";
 import { getErrorMessage } from "@/services/api";
-import { getMasterSnapshot } from "@/services/ingredientMaster";
+import { useIngredientMaster } from "@/context/IngredientMasterContext";
 import { mapStorageTypeFromApi } from "@/services/userIngredients";
 import { CapacityInput } from "@/components/CapacityInput";
 
@@ -224,6 +224,8 @@ function DetailEditor({
   insets: ReturnType<typeof useSafeAreaInsets>;
   showToast: (msg: string) => void;
 }) {
+  const { snapshot } = useIngredientMaster();
+
   // ── State ──
   const [category, setCategory] = useState(init.category);
   const [name] = useState(init.name);
@@ -241,8 +243,8 @@ function DetailEditor({
   // echoing `ingredientId` yet — for true custom items both resolve to
   // undefined, which keeps the quick-pick chips hidden.
   const masterIngredientId = useMemo(
-    () => init.ingredientId ?? getMasterSnapshot().byName.get(name)?.id,
-    [init.ingredientId, name],
+    () => init.ingredientId ?? snapshot?.byName.get(name)?.id,
+    [init.ingredientId, name, snapshot],
   );
 
   // Trust the backend `isCustom` when present; otherwise infer from whether
@@ -255,7 +257,7 @@ function DetailEditor({
   // IngredientEditCard uses in the add flow.
   const hasQuickExpiry = useMemo(() => {
     if (masterIngredientId == null) return false;
-    const opts = getMasterSnapshot().optionsByIngredientId.get(masterIngredientId);
+    const opts = snapshot?.optionsByIngredientId.get(masterIngredientId);
     if (!opts) return false;
     const apiStorage = mapStorageTypeFromApi
       // mapStorageTypeFromApi maps the other direction (api → domain). We need
@@ -263,7 +265,7 @@ function DetailEditor({
       ? opts.find((o) => mapStorageTypeFromApi(o.storageType) === storage)
       : undefined;
     return !!apiStorage;
-  }, [masterIngredientId, storage]);
+  }, [masterIngredientId, storage, snapshot]);
 
   const handleStorageChange = (newStorage: StorageType) => {
     setStorage(newStorage);

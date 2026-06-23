@@ -34,13 +34,13 @@ import {
   INGREDIENT_BY_NAME,
   INGREDIENT_BY_ID,
   STORAGE_OPTIONS_BY_INGREDIENT_ID,
-  type ApiStorageType,
   type CategoryEntry,
   type IngredientMasterEntry,
   type StorageOptionEntry,
   type SubCategoryEntry,
 } from "@/constants/ingredients-master";
 import { api } from "@/services/api";
+import type { MasterResponse } from "@/types/ingredientMaster";
 
 // ─── Storage keys + URL ──────────────────────────────────────────────────────
 
@@ -49,25 +49,6 @@ const DATA_KEY = "keepeat:ingredientMaster:data";
 const MASTER_URL = "/api/v1/ingredients/master";
 
 // ─── DTOs + snapshot shapes ──────────────────────────────────────────────────
-
-interface RawStorageOption {
-  storageType: ApiStorageType;
-  minDays: number;
-  maxDays: number;
-}
-
-interface RawIngredient {
-  id: number;
-  subCategoryId: number;
-  name: string;
-  storageOptions: RawStorageOption[];
-}
-
-interface RawMasterResponse {
-  categories: { id: number; name: string }[];
-  subCategories: { id: number; categoryId: number; name: string }[];
-  ingredients: RawIngredient[];
-}
 
 /** Plain serializable shape — what we persist to AsyncStorage. */
 interface PersistedSnapshot {
@@ -93,7 +74,7 @@ export interface ResolvedSnapshot extends PersistedSnapshot {
  * makes `min * METRIC_TO_DAYS[metric]` evaluate to `min` exactly — preserves
  * every existing call site without changes).
  */
-function persistedFromRaw(raw: RawMasterResponse): PersistedSnapshot {
+function persistedFromRaw(raw: MasterResponse): PersistedSnapshot {
   const storageOptions: StorageOptionEntry[] = [];
   const ingredients: IngredientMasterEntry[] = [];
   for (const ing of raw.ingredients) {
@@ -205,7 +186,7 @@ export async function fetchMaster(): Promise<FetchMasterSource> {
   }
 
   try {
-    const { status, data, headers } = await api.get<RawMasterResponse>(
+    const { status, data, headers } = await api.get<MasterResponse>(
       MASTER_URL,
       {
         headers: etag ? { "If-None-Match": etag } : undefined,

@@ -24,7 +24,7 @@ import { api } from "@/services/api";
 import { tokenStorage } from "@/services/tokenStorage";
 import { API_BASE_URL } from "@/constants/config";
 import { UNITS, type IngredientDraft, type StorageType, type Unit } from "@/constants/domain";
-import type { ApiStorageType } from "@/constants/ingredients-master";
+import type { ApiStorageType } from "@/types/ingredientMaster";
 
 // ─── Backend DTOs ────────────────────────────────────────────────────────────
 

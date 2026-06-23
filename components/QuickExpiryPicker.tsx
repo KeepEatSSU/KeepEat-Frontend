@@ -12,7 +12,7 @@ import {
   METRIC_TO_DAYS,
   type ApiStorageType,
 } from "@/constants/ingredients-master";
-import { getMasterSnapshot } from "@/services/ingredientMaster";
+import { useIngredientMaster } from "@/context/IngredientMasterContext";
 import { toISODate, formatDaysApprox } from "@/utils/dateUtils";
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
@@ -66,14 +66,16 @@ export function QuickExpiryPicker({
   showLabel = true,
   inGroup = false,
 }: QuickExpiryPickerProps) {
+  const { snapshot } = useIngredientMaster();
+
   const match = useMemo(() => {
     if (ingredientId == null || storage == null) return undefined;
-    const opts = getMasterSnapshot().optionsByIngredientId.get(ingredientId);
+    const opts = snapshot?.optionsByIngredientId.get(ingredientId);
     if (!opts) return undefined;
     return opts.find(
       (o) => o.storageType === STORAGE_DOMAIN_TO_API[storage],
     );
-  }, [ingredientId, storage]);
+  }, [ingredientId, storage, snapshot]);
 
   if (!match) return null;
 

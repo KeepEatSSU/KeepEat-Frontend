@@ -138,11 +138,11 @@ let cachedSnapshotRef: ResolvedSnapshot | null = null;
 let cachedCategoryNames: Set<string> = new Set();
 let cachedSubcategoryToCategory: Map<string, string> = new Map();
 
-function getCategoryLookups(): {
+function getCategoryLookups(snapshot?: ResolvedSnapshot): {
   names: Set<string>;
   subToCat: Map<string, string>;
 } {
-  const snap = getMasterSnapshot();
+  const snap = snapshot ?? getMasterSnapshot();
   if (snap !== cachedSnapshotRef) {
     cachedSnapshotRef = snap;
     cachedCategoryNames = new Set(snap.categories.map((c) => c.name));
@@ -156,9 +156,12 @@ function getCategoryLookups(): {
   return { names: cachedCategoryNames, subToCat: cachedSubcategoryToCategory };
 }
 
-export function categoryFromApi(apiName: string | undefined): string {
+export function categoryFromApi(
+  apiName: string | undefined,
+  snapshot?: ResolvedSnapshot,
+): string {
   if (!apiName) return "";
-  const { names, subToCat } = getCategoryLookups();
+  const { names, subToCat } = getCategoryLookups(snapshot);
   if (names.has(apiName)) return apiName;
   const viaSub = subToCat.get(apiName);
   if (viaSub) return viaSub;
@@ -172,14 +175,20 @@ export function categoryFromApi(apiName: string | undefined): string {
 
 // ─── Ingredient mappers ──────────────────────────────────────────────────────
 
-export function mapIngredientFromApi(dto: UserIngredientResponse): Ingredient {
+export function mapIngredientFromApi(
+  dto: UserIngredientResponse,
+  snapshot?: ResolvedSnapshot,
+): Ingredient {
   const quantityDisplay = dto.unit
     ? `${dto.quantity}${dto.unit}`
     : `${dto.quantity}`;
 
   // Normalize whatever the backend returns (category or sub-category name)
   // into one of the 10 master categories. See `categoryFromApi`.
-  const canonical = categoryFromApi(dto.subCategoryName ?? dto.categoryName);
+  const canonical = categoryFromApi(
+    dto.subCategoryName ?? dto.categoryName,
+    snapshot,
+  );
 
   // Master vs custom name semantics:
   //   Master items — `dto.name` holds the catalog display name; `customName`
@@ -308,19 +317,28 @@ export function mapIngredientToUpdateRequest(
 const BASE = "/api/v1/user-ingredients";
 
 /** GET /api/v1/user-ingredients — 204 returns []. */
-export async function fetchAllIngredients(): Promise<Ingredient[]> {
+export async function fetchAllIngredients(
+  snapshot?: ResolvedSnapshot | null,
+): Promise<Ingredient[]> {
   const res = await api.get<UserIngredientResponse[]>(BASE);
   if (res.status === 204 || !res.data) return [];
-  return res.data.map(mapIngredientFromApi);
+  return res.data.map((dto) =>
+    mapIngredientFromApi(dto, snapshot ?? undefined),
+  );
 }
 
 /** GET /api/v1/user-ingredients/search?q=... — 204 returns []. */
-export async function searchIngredients(query: string): Promise<Ingredient[]> {
+export async function searchIngredients(
+  query: string,
+  snapshot?: ResolvedSnapshot | null,
+): Promise<Ingredient[]> {
   const res = await api.get<UserIngredientResponse[]>(`${BASE}/search`, {
     params: { q: query },
   });
   if (res.status === 204 || !res.data) return [];
-  return res.data.map(mapIngredientFromApi);
+  return res.data.map((dto) =>
+    mapIngredientFromApi(dto, snapshot ?? undefined),
+  );
 }
 
 /** POST /api/v1/user-ingredients — wraps `items` per the backend contract. */
@@ -328,7 +346,7 @@ export async function createIngredients(
   items: UserIngredientCreateRequest[],
 ): Promise<Ingredient[]> {
   const res = await api.post<UserIngredientResponse[]>(BASE, { items });
-  return (res.data ?? []).map(mapIngredientFromApi);
+  return (res.data ?? []).map((dto) => mapIngredientFromApi(dto));
 }
 
 /** PATCH /api/v1/user-ingredients/{id} — partial update, returns the updated row. */

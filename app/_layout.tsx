@@ -13,7 +13,7 @@ import { PushPermissionPrompt } from "@/components/PushPermissionPrompt";
 import { RecipeRecommendationProvider } from "@/context/RecipeRecommendationContext";
 import { AuthProvider, useAuth } from "@/context/AuthContext";
 import { NotificationProvider } from "@/context/NotificationContext";
-import { fetchMaster } from "@/services/ingredientMaster";
+import { IngredientMasterProvider } from "@/context/IngredientMasterContext";
 import { registerForPushNotificationsAsync } from "@/services/pushNotifications";
 
 // Required for the in-app browser auth session to dismiss cleanly on iOS
@@ -62,20 +62,6 @@ function AuthGate({ children }: { children: React.ReactNode }) {
   return <>{children}</>;
 }
 
-// Loads the ingredient master catalog into the in-memory snapshot once the
-// user is authenticated. Idempotent — re-fires on login transitions and the
-// service de-dupes via its ETag/cache. Renders nothing.
-function IngredientMasterBootstrap() {
-  const { isAuthenticated } = useAuth();
-  useEffect(() => {
-    if (!isAuthenticated) return;
-    fetchMaster().then((source) => {
-      if (__DEV__) console.log("[master] loaded from:", source);
-    });
-  }, [isAuthenticated]);
-  return null;
-}
-
 export default function RootLayout() {
   // One-shot push-token registration on app boot. Server upload comes later;
   // for now we just log so we can verify the issuance pipeline end-to-end.
@@ -112,88 +98,89 @@ export default function RootLayout() {
                   no-op을 받아 안내/에러 토스트가 무동작이 된다. */}
               <RecipeRecommendationProvider>
               <AuthGate>
-                <IngredientMasterBootstrap />
-                <PushPermissionPrompt />
-                <Stack screenOptions={{ headerShown: false }}>
-                  <Stack.Screen name="(tabs)" />
-                  <Stack.Screen
-                    name="login"
-                    options={{ animation: "fade" }}
-                  />
-                  <Stack.Screen
-                    name="signup"
-                    options={{ animation: "slide_from_right" }}
-                  />
-                  <Stack.Screen
-                    name="signup-profile"
-                    options={{ animation: "slide_from_right" }}
-                  />
-                  <Stack.Screen
-                    name="change-password"
-                    options={{ animation: "slide_from_right" }}
-                  />
-                  <Stack.Screen
-                    name="detail"
-                    options={{
-                      presentation: "fullScreenModal",
-                      gestureEnabled: false,
-                      animation: "slide_from_bottom",
-                    }}
-                  />
-                  <Stack.Screen
-                    name="crop"
-                    options={{
-                      presentation: "fullScreenModal",
-                      gestureEnabled: false,
-                      animation: "slide_from_bottom",
-                    }}
-                  />
-                  <Stack.Screen
-                    name="recipe-detail"
-                    options={{
-                      animation: "slide_from_right",
-                    }}
-                  />
-                  <Stack.Screen
-                    name="cooking-ready"
-                    options={{
-                      presentation: "fullScreenModal",
-                      gestureEnabled: false,
-                      animation: "slide_from_bottom",
-                    }}
-                  />
-                  <Stack.Screen
-                    name="cooking-step"
-                    options={{
-                      presentation: "fullScreenModal",
-                      gestureEnabled: false,
-                      animation: "slide_from_right",
-                    }}
-                  />
-                  <Stack.Screen
-                    name="cooking-complete"
-                    options={{
-                      presentation: "card",
-                      animation: "slide_from_right",
-                    }}
-                  />
-                  <Stack.Screen
-                    name="recipe-swipe"
-                    options={{
-                      presentation: "card",
-                      animation: "slide_from_right",
-                      gestureEnabled: false,
-                    }}
-                  />
-                  <Stack.Screen
-                    name="add-confirm"
-                    options={{
-                      presentation: "fullScreenModal",
-                      gestureEnabled: false,
-                      animation: "slide_from_bottom",
-                    }}
-                  />
-                </Stack>
+                <IngredientMasterProvider>
+                  <PushPermissionPrompt />
+                  <Stack screenOptions={{ headerShown: false }}>
+                    <Stack.Screen name="(tabs)" />
+                    <Stack.Screen
+                      name="login"
+                      options={{ animation: "fade" }}
+                    />
+                    <Stack.Screen
+                      name="signup"
+                      options={{ animation: "slide_from_right" }}
+                    />
+                    <Stack.Screen
+                      name="signup-profile"
+                      options={{ animation: "slide_from_right" }}
+                    />
+                    <Stack.Screen
+                      name="change-password"
+                      options={{ animation: "slide_from_right" }}
+                    />
+                    <Stack.Screen
+                      name="detail"
+                      options={{
+                        presentation: "fullScreenModal",
+                        gestureEnabled: false,
+                        animation: "slide_from_bottom",
+                      }}
+                    />
+                    <Stack.Screen
+                      name="crop"
+                      options={{
+                        presentation: "fullScreenModal",
+                        gestureEnabled: false,
+                        animation: "slide_from_bottom",
+                      }}
+                    />
+                    <Stack.Screen
+                      name="recipe-detail"
+                      options={{
+                        animation: "slide_from_right",
+                      }}
+                    />
+                    <Stack.Screen
+                      name="cooking-ready"
+                      options={{
+                        presentation: "fullScreenModal",
+                        gestureEnabled: false,
+                        animation: "slide_from_bottom",
+                      }}
+                    />
+                    <Stack.Screen
+                      name="cooking-step"
+                      options={{
+                        presentation: "fullScreenModal",
+                        gestureEnabled: false,
+                        animation: "slide_from_right",
+                      }}
+                    />
+                    <Stack.Screen
+                      name="cooking-complete"
+                      options={{
+                        presentation: "card",
+                        animation: "slide_from_right",
+                      }}
+                    />
+                    <Stack.Screen
+                      name="recipe-swipe"
+                      options={{
+                        presentation: "card",
+                        animation: "slide_from_right",
+                        gestureEnabled: false,
+                      }}
+                    />
+                    <Stack.Screen
+                      name="add-confirm"
+                      options={{
+                        presentation: "fullScreenModal",
+                        gestureEnabled: false,
+                        animation: "slide_from_bottom",
+                      }}
+                    />
+                  </Stack>
+                </IngredientMasterProvider>
               </AuthGate>
               <StatusBar style="dark" />
               </RecipeRecommendationProvider>
