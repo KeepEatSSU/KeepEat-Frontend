@@ -147,6 +147,14 @@ export function IngredientPickerSheet({
     onClose();
   }, [onClose]);
 
+  const handleRequestClose = useCallback(() => {
+    if (activeCategory) {
+      setActiveCategory(null);
+      return;
+    }
+    handleClose();
+  }, [activeCategory, handleClose]);
+
   const handlePickCustom = useCallback(() => {
     if (!onPickCustom) return;
     const name = search.trim();
@@ -179,232 +187,227 @@ export function IngredientPickerSheet({
       transparent={false}
       animationType="slide"
       presentationStyle="fullScreen"
-      onRequestClose={handleClose}
+      onRequestClose={handleRequestClose}
     >
-      <KeyboardAvoidingView
-        style={styles.container}
-        behavior={Platform.OS === "ios" ? "padding" : undefined}
-      >
-        <View
-          style={[
-            styles.header,
-            { paddingTop: Math.max(insets.top, Spacing.lg) },
-          ]}
+      <View style={styles.modalRoot}>
+        <KeyboardAvoidingView
+          testID="ingredient-picker.sheet.root"
+          style={styles.container}
+          behavior={Platform.OS === "ios" ? "padding" : undefined}
         >
-          <Pressable
-            onPress={handleClose}
-            style={({ pressed }) => [
-              styles.backButton,
-              pressed && { opacity: 0.6 },
+          <View
+            style={[
+              styles.header,
+              { paddingTop: Math.max(insets.top, Spacing.lg) },
             ]}
           >
-            <Ionicons name="chevron-back" size={28} color={Colors.onSurface} />
-          </Pressable>
-          <Text style={styles.headerTitle}>식재료 선택</Text>
-          <View style={styles.headerRight} />
-        </View>
-
-        <View style={styles.searchContainer}>
-          <View style={styles.searchBar}>
-            <Ionicons
-              name="search"
-              size={20}
-              color={Colors.outline}
-              style={{ marginRight: Spacing.sm }}
-            />
-            <TextInput
-              ref={inputRef}
-              value={search}
-              onChangeText={setSearch}
-              placeholder="식재료 이름을 검색해 보세요"
-              placeholderTextColor={Colors.outline}
-              style={styles.searchInput}
-              autoCorrect={false}
-              autoCapitalize="none"
-              returnKeyType="search"
-            />
-            {search.length > 0 && (
-              <Pressable onPress={() => setSearch("")}>
-                <Ionicons
-                  name="close-circle"
-                  size={20}
-                  color={Colors.outline}
-                />
-              </Pressable>
-            )}
+            <Pressable
+              testID="ingredient-picker.close-button"
+              onPress={handleClose}
+              style={({ pressed }) => [
+                styles.backButton,
+                pressed && { opacity: 0.6 },
+              ]}
+            >
+              <Ionicons name="chevron-back" size={28} color={Colors.onSurface} />
+            </Pressable>
+            <Text style={styles.headerTitle}>식재료 선택</Text>
+            <View style={styles.headerRight} />
           </View>
-        </View>
 
-        <View style={styles.listContainer}>
-          {trimmed === "" ? (
-            // ── Default: split layout. Left = recents column, right =
-            // 10-category grid. Each pane scrolls on its own so a long
-            // recent list never pushes the category grid out of view.
-            <View style={styles.splitContainer}>
-              <View style={styles.leftPane}>
-                <Text style={styles.paneLabel}>최근 선택</Text>
-                {recents.length > 0 ? (
+          <View style={styles.searchContainer}>
+            <View style={styles.searchBar}>
+              <Ionicons
+                name="search"
+                size={20}
+                color={Colors.outline}
+                style={{ marginRight: Spacing.sm }}
+              />
+              <TextInput
+                ref={inputRef}
+                value={search}
+                onChangeText={setSearch}
+                placeholder="식재료 이름을 검색해 보세요"
+                placeholderTextColor={Colors.outline}
+                style={styles.searchInput}
+                autoCorrect={false}
+                autoCapitalize="none"
+                returnKeyType="search"
+              />
+              {search.length > 0 && (
+                <Pressable onPress={() => setSearch("")}>
+                  <Ionicons
+                    name="close-circle"
+                    size={20}
+                    color={Colors.outline}
+                  />
+                </Pressable>
+              )}
+            </View>
+          </View>
+
+          <View style={styles.listContainer}>
+            {trimmed === "" ? (
+              // ── Default: split layout. Left = recents column, right =
+              // 10-category grid. Each pane scrolls on its own so a long
+              // recent list never pushes the category grid out of view.
+              <View style={styles.splitContainer}>
+                <View style={styles.leftPane}>
+                  <Text style={styles.paneLabel}>최근 선택</Text>
+                  {recents.length > 0 ? (
+                    <ScrollView
+                      style={styles.paneScroll}
+                      contentContainerStyle={{
+                        gap: 10,
+                        paddingBottom: Math.max(insets.bottom, Spacing.lg),
+                      }}
+                      showsVerticalScrollIndicator={false}
+                      keyboardShouldPersistTaps="handled"
+                    >
+                      {recents.map((entry) => (
+                        <Pressable
+                          key={`recent-${entry.id}`}
+                          onPress={() => handlePick(entry)}
+                          style={({ pressed }) => [
+                            styles.recentRow,
+                            pressed && { opacity: 0.6 },
+                          ]}
+                        >
+                          <IngredientIcon
+                            ingredientId={entry.id}
+                            size={44}
+                          />
+                          <Text style={styles.recentName} numberOfLines={1}>
+                            {entry.name}
+                          </Text>
+                        </Pressable>
+                      ))}
+                    </ScrollView>
+                  ) : (
+                    <View style={styles.recentEmpty}>
+                      <Text style={styles.recentEmptyText}>
+                        최근 선택한{"\n"}재료가 없어요
+                      </Text>
+                    </View>
+                  )}
+                </View>
+
+                <View style={styles.rightPane}>
+                  <Text style={styles.paneLabel}>카테고리</Text>
                   <ScrollView
                     style={styles.paneScroll}
                     contentContainerStyle={{
-                      gap: 10,
                       paddingBottom: Math.max(insets.bottom, Spacing.lg),
                     }}
                     showsVerticalScrollIndicator={false}
                     keyboardShouldPersistTaps="handled"
                   >
-                    {recents.map((entry) => (
+                    <View style={styles.categoryGrid}>
+                      {categories.map((cat) => {
+                        const iconId = categoryIconIds.get(cat.id) ?? null;
+                        return (
+                          <Pressable
+                            key={cat.id}
+                            onPress={() => setActiveCategory(cat)}
+                            style={({ pressed }) => [
+                              styles.categoryCell,
+                              pressed && { opacity: 0.7 },
+                            ]}
+                          >
+                            <IngredientIcon
+                              ingredientId={iconId}
+                              size={44}
+                            />
+                            <Text
+                              style={styles.categoryCellName}
+                              numberOfLines={1}
+                            >
+                              {cat.name}
+                            </Text>
+                          </Pressable>
+                        );
+                      })}
+                    </View>
+                  </ScrollView>
+                </View>
+              </View>
+            ) : (
+              // ── Search mode: full-width result list (unchanged from before)
+              <ScrollView
+                style={styles.list}
+                contentContainerStyle={[
+                  styles.listContent,
+                  { paddingBottom: Math.max(insets.bottom, Spacing.xl) },
+                ]}
+                showsVerticalScrollIndicator={false}
+                keyboardShouldPersistTaps="handled"
+              >
+                {searchResults.length > 0 ? (
+                  searchResults.map((entry) => (
+                    <PickerRow
+                      key={`hit-${entry.id}`}
+                      id={entry.id}
+                      name={entry.name}
+                      isSelected={selected === entry.name}
+                      onPress={() => handlePick(entry)}
+                    />
+                  ))
+                ) : (
+                  <View style={styles.placeholderBlock}>
+                    <Ionicons
+                      name="leaf-outline"
+                      size={40}
+                      color={Colors.outlineVariant}
+                    />
+                    <Text style={styles.placeholderText}>
+                      찾으시는 식재료가 없나요?
+                    </Text>
+                    {trimmed.length > 0 && onPickCustom && (
                       <Pressable
-                        key={`recent-${entry.id}`}
-                        onPress={() => handlePick(entry)}
+                        testID="ingredient-picker.custom-add.button"
+                        onPress={handlePickCustom}
                         style={({ pressed }) => [
-                          styles.recentRow,
-                          pressed && { opacity: 0.6 },
+                          styles.customAddButton,
+                          pressed && { opacity: 0.8 },
                         ]}
                       >
-                        <IngredientIcon
-                          ingredientId={entry.id}
-                          size={44}
-                        />
-                        <Text style={styles.recentName} numberOfLines={1}>
-                          {entry.name}
+                        <Text style={styles.customAddText}>
+                          {`"${trimmed}" 직접 추가하기`}
                         </Text>
                       </Pressable>
-                    ))}
-                  </ScrollView>
-                ) : (
-                  <View style={styles.recentEmpty}>
-                    <Text style={styles.recentEmptyText}>
-                      최근 선택한{"\n"}재료가 없어요
+                    )}
+                    <Text style={styles.placeholderRequest}>
+                      KeepEat 팀에 알리기
                     </Text>
                   </View>
                 )}
-              </View>
+              </ScrollView>
+            )}
+          </View>
+        </KeyboardAvoidingView>
 
-              <View style={styles.rightPane}>
-                <Text style={styles.paneLabel}>카테고리</Text>
-                <ScrollView
-                  style={styles.paneScroll}
-                  contentContainerStyle={{
-                    paddingBottom: Math.max(insets.bottom, Spacing.lg),
-                  }}
-                  showsVerticalScrollIndicator={false}
-                  keyboardShouldPersistTaps="handled"
-                >
-                  <View style={styles.categoryGrid}>
-                    {categories.map((cat) => {
-                      const iconId = categoryIconIds.get(cat.id) ?? null;
-                      return (
-                        <Pressable
-                          key={cat.id}
-                          onPress={() => setActiveCategory(cat)}
-                          style={({ pressed }) => [
-                            styles.categoryCell,
-                            pressed && { opacity: 0.7 },
-                          ]}
-                        >
-                          <IngredientIcon
-                            ingredientId={iconId}
-                            size={44}
-                          />
-                          <Text
-                            style={styles.categoryCellName}
-                            numberOfLines={1}
-                          >
-                            {cat.name}
-                          </Text>
-                        </Pressable>
-                      );
-                    })}
-                  </View>
-                </ScrollView>
-              </View>
-            </View>
-          ) : (
-            // ── Search mode: full-width result list (unchanged from before)
-            <ScrollView
-              style={styles.list}
-              contentContainerStyle={[
-                styles.listContent,
-                { paddingBottom: Math.max(insets.bottom, Spacing.xl) },
-              ]}
-              showsVerticalScrollIndicator={false}
-              keyboardShouldPersistTaps="handled"
-            >
-              {searchResults.length > 0 ? (
-                searchResults.map((entry) => (
-                  <PickerRow
-                    key={`hit-${entry.id}`}
-                    id={entry.id}
-                    name={entry.name}
-                    isSelected={selected === entry.name}
-                    onPress={() => handlePick(entry)}
-                  />
-                ))
-              ) : (
-                <View style={styles.placeholderBlock}>
-                  <Ionicons
-                    name="leaf-outline"
-                    size={40}
-                    color={Colors.outlineVariant}
-                  />
-                  <Text style={styles.placeholderText}>
-                    찾으시는 식재료가 없나요?
-                  </Text>
-                  {trimmed.length > 0 && onPickCustom && (
-                    <Pressable
-                      onPress={handlePickCustom}
-                      style={({ pressed }) => [
-                        styles.customAddButton,
-                        pressed && { opacity: 0.8 },
-                      ]}
-                    >
-                      <Text style={styles.customAddText}>
-                        "{trimmed}" 직접 추가하기
-                      </Text>
-                    </Pressable>
-                  )}
-                  <Text style={styles.placeholderRequest}>
-                    KeepEat 팀에 알리기
-                  </Text>
-                </View>
-              )}
-            </ScrollView>
-          )}
-        </View>
-      </KeyboardAvoidingView>
-
-      {/* Category modal — full-screen overlay so iOS and Android present
-          the grid identically (no pageSheet slide-down handle on iOS).
-          Conditional render of the body (instead of just toggling
-          Modal.visible) forces the PagerView to remount when the user
-          reopens with a different category, so its `initialPage` reads
-          correctly each session. */}
-      <Modal
-        visible={activeCategory != null}
-        animationType="slide"
-        presentationStyle="overFullScreen"
-        onRequestClose={() => setActiveCategory(null)}
-      >
+        {/* Category overlay stays inside the picker Modal. Closing a nested
+            native Modal and its parent in the same selection tick leaves iOS
+            Simulator on a black window in this flow. */}
         {activeCategory && (
-          <CategoryGridModal
-            activeCategory={activeCategory}
-            categories={categories}
-            ingredientsByCategory={ingredientsByCategory}
-            onChangeCategory={setActiveCategory}
-            onPickIngredient={(ing) => {
-              // Same path as recents/search picks: persists to recents,
-              // closes the outer picker, fires onSelect upward. We also
-              // close the category modal here so the user returns to the
-              // add-confirm card directly.
-              setActiveCategory(null);
-              handlePick(ing);
-            }}
-            onClose={() => setActiveCategory(null)}
-            insets={insets}
-          />
+          <View style={styles.categoryOverlay}>
+            <CategoryGridModal
+              activeCategory={activeCategory}
+              categories={categories}
+              ingredientsByCategory={ingredientsByCategory}
+              onChangeCategory={setActiveCategory}
+              onPickIngredient={(ing) => {
+                // Same path as recents/search picks: persists to recents,
+                // closes the outer picker, fires onSelect upward.
+                setActiveCategory(null);
+                handlePick(ing);
+              }}
+              onClose={() => setActiveCategory(null)}
+              insets={insets}
+            />
+          </View>
         )}
-      </Modal>
+      </View>
     </Modal>
   );
 }
@@ -679,6 +682,10 @@ function PickerRow({
 }
 
 const styles = StyleSheet.create({
+  modalRoot: {
+    flex: 1,
+    backgroundColor: Colors.surface,
+  },
   container: {
     flex: 1,
     backgroundColor: Colors.surface,
@@ -827,6 +834,11 @@ const styles = StyleSheet.create({
     flex: 1,
     backgroundColor: Colors.surface,
   },
+  categoryOverlay: {
+    ...StyleSheet.absoluteFillObject,
+    backgroundColor: Colors.surface,
+    zIndex: 1,
+  },
   // The modal's title sits flat (no LetterSpacing.tight) and uses regular
   // body weight — the spec calls for a quieter header than the picker's own.
   modalHeaderTitle: {
@@ -943,7 +955,7 @@ const styles = StyleSheet.create({
   },
   placeholderBlock: {
     alignItems: "center",
-    paddingTop: Spacing.xxxl,
+    paddingTop: Spacing.xxl,
     paddingBottom: Spacing.xxl,
     gap: Spacing.sm,
   },

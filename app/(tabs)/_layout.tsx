@@ -1,4 +1,5 @@
 import { AddMenuSheet } from "@/components/AddMenuSheet";
+import { BottomGlassSurface } from "@/components/BottomGlassSurface";
 import {
   Colors,
   FontSize,
@@ -10,11 +11,9 @@ import {
 import { Ionicons } from "@expo/vector-icons";
 import type { BottomTabBarProps } from "@react-navigation/bottom-tabs";
 import * as ImagePicker from "expo-image-picker";
-import { LinearGradient } from "expo-linear-gradient";
 import { Tabs, useRouter } from "expo-router";
 import { useState } from "react";
 import { Alert, Platform, Pressable, StyleSheet, Text, View } from "react-native";
-import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useNotifications } from "@/context/NotificationContext";
 
 // ─── Custom Floating Tab Bar ──────────────────────────────────────────────────
@@ -47,22 +46,12 @@ function FloatingTabBar({
   navigation,
   onFabPress,
 }: BottomTabBarProps & { onFabPress: () => void }) {
-  const insets = useSafeAreaInsets();
-
   return (
     <View style={styles.tabBarWrapper} pointerEvents="box-none">
-      <LinearGradient
-        colors={[
-          "rgba(255, 255, 255, 0.8)",
-          "rgba(255, 255, 255, 0.9)",
-          "rgba(255, 255, 255, 1)",
-        ]}
-        start={{ x: 0, y: 0 }}
-        end={{ x: 0, y: 1 }}
-        style={[
-          styles.tabBarPill,
-          { paddingBottom: insets.bottom + Spacing.sm },
-        ]}
+      <BottomGlassSurface
+        contentStyle={styles.tabBarPill}
+        paddingBottomMin={0}
+        paddingBottomExtra={Spacing.sm}
       >
         {state.routes.map((route, index) => {
           const isFocused = state.index === index;
@@ -124,7 +113,7 @@ function FloatingTabBar({
             </Pressable>
           );
         })}
-      </LinearGradient>
+      </BottomGlassSurface>
     </View>
   );
 }
@@ -264,25 +253,8 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "space-around",
-    borderTopLeftRadius: 20,
-    borderTopRightRadius: 20,
-    borderBottomLeftRadius: 0,
-    borderBottomRightRadius: 0,
     paddingHorizontal: Spacing.md,
     paddingTop: Spacing.sm,
-    overflow: "hidden",
-    ...Platform.select({
-      ios: {
-        shadowColor: "#191C1D",
-        shadowOffset: { width: 0, height: -2 },
-        shadowOpacity: 0.08,
-        shadowRadius: 8,
-      },
-      android: {
-        borderTopWidth: 1,
-        borderTopColor: "rgba(0, 0, 0, 0.06)",
-      },
-    }),
   },
   tabItem: {
     alignItems: "center",

@@ -118,9 +118,11 @@ Redux, Zustand, React Query 같은 외부 상태 관리 도구는 현재 사용�
 
 ## 검증과 테스트 상태
 
-- `package.json`에 확인된 스크립트: `npm start`, `npm run ios`, `npm run android`, `npm run web`, `npm run lint`.
-- 테스트 스크립트는 현재 확인되지 않았다.
-- `app/`, `components/`에서 `testID` 사용은 확인되지 않았다.
+- `package.json`에 확인된 실행 스크립트: `npm start`, `npm run ios`, `npm run android`, `npm run web`.
+- 최소 정적 검증 스크립트: `npm run verify` (`npm run lint` 후 `npm run typecheck`).
+- 타입 체크는 `tsconfig.verify.json`을 사용해 본 앱 소스와 Expo 타입을 검사한다.
+- 단위/E2E 테스트 스크립트는 현재 확인되지 않았다.
+- `components/` 일부에 MCP 관찰 하네스용 최소 `testID`가 있다. 전체 목록은 `docs/quality/test-ids.md`를 확인한다.
 - 접근성 라벨과 역할은 일부 컴포넌트/화면에 존재한다.
 
 ## 확인 필요

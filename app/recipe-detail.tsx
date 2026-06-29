@@ -18,6 +18,8 @@ import {
   Spacing,
   FontSize,
   FontWeight,
+  Glass,
+  GlassAction,
   Radius,
   Shadows,
   LetterSpacing,
@@ -45,6 +47,7 @@ import {
 import { useIngredientMaster } from "@/context/IngredientMasterContext";
 import { IngredientEditCard } from "@/components/IngredientEditCard";
 import { ConfirmModal } from "@/components/ConfirmModal";
+import { BottomGlassActions } from "@/components/BottomGlassActions";
 import { useToast } from "@/components/Toast";
 import { ErrorScreen } from "@/components/ErrorScreen";
 
@@ -695,11 +698,25 @@ export default function RecipeDetailScreen() {
           • Already in 내 레시피 → original cooking-flow buttons. Cooking
             entry is gated behind ownership so the user always has a
             persisted recipe row to attribute the cook to. */}
-      <View
-        style={[
-          styles.bottomCta,
-          { paddingBottom: Math.max(insets.bottom, 12) },
-        ]}
+      <BottomGlassActions
+        secondaryAction={
+          recipe.isRegisteredMyRecipe ? (
+            <Pressable
+              onPress={() =>
+                router.push({
+                  pathname: "/cooking-complete",
+                  params: { id: recipe.recipeId },
+                } as never)
+              }
+              style={({ pressed }) => [
+                styles.shortcutBtn,
+                pressed && { opacity: 0.5 },
+              ]}
+            >
+              <Text style={styles.shortcutText}>바로 완성하기</Text>
+            </Pressable>
+          ) : undefined
+        }
       >
         {!recipe.isRegisteredMyRecipe ? (
           <Pressable
@@ -742,23 +759,9 @@ export default function RecipeDetailScreen() {
             >
               <Text style={styles.ctaText}>요리 시작하기</Text>
             </Pressable>
-            <Pressable
-              onPress={() =>
-                router.push({
-                  pathname: "/cooking-complete",
-                  params: { id: recipe.recipeId },
-                } as never)
-              }
-              style={({ pressed }) => [
-                styles.shortcutBtn,
-                pressed && { opacity: 0.5 },
-              ]}
-            >
-              <Text style={styles.shortcutText}>바로 완성하기</Text>
-            </Pressable>
           </>
         )}
-      </View>
+      </BottomGlassActions>
 
       {/* ── Unregister Confirm ── */}
       <ConfirmModal
@@ -876,10 +879,9 @@ const styles = StyleSheet.create({
   // Scroll
   scrollContent: {
     paddingHorizontal: Spacing.xl,
-    // bottomCta는 sibling이라 가림 보호 불필요. 마지막 step과 CTA 영역
-    // 사이의 자연스러운 끝 여백만 남긴다 (이전 100은 과해서 짧은 레시피에선
-    // 큰 빈 공간으로 보였음).
-    paddingBottom: Spacing.lg,
+    // bottomCta는 glass overlay라 마지막 조리 순서가 버튼 뒤에 과하게
+    // 가려지지 않도록 보호 여백을 둔다.
+    paddingBottom: 128,
   },
 
   // Hero
@@ -1132,21 +1134,15 @@ const styles = StyleSheet.create({
   },
 
   // Bottom CTA
-  bottomCta: {
-    paddingHorizontal: Spacing.xl,
-    paddingTop: Spacing.md,
-    alignItems: "center",
-    backgroundColor: Colors.glassBackground,
-    ...Shadows.ambient,
-  },
   ctaButton: {
     width: "100%",
-    backgroundColor: Colors.primary,
+    height: Glass.bottomBarActionHeight,
+    backgroundColor: GlassAction.primaryBackground,
     borderRadius: Radius.xl,
-    paddingVertical: Spacing.base,
     alignItems: "center",
     justifyContent: "center",
-    ...Shadows.fab,
+    ...GlassAction.topHighlight,
+    ...GlassAction.elevated,
   },
   ctaButtonDisabled: {
     backgroundColor: Colors.surfaceContainerHigh,
@@ -1157,9 +1153,10 @@ const styles = StyleSheet.create({
     color: Colors.onPrimary,
   },
   shortcutBtn: {
+    minHeight: Glass.bottomBarSecondaryActionMinHeight,
     alignItems: "center",
-    paddingVertical: Spacing.xs,
-    marginTop: Spacing.sm,
+    justifyContent: "center",
+    paddingHorizontal: Spacing.base,
   },
   shortcutText: {
     fontSize: FontSize.bodySm,

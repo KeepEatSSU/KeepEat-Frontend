@@ -239,6 +239,7 @@ export function IngredientEditCard({
       <View style={styles.cardHeader}>
         {item.isCustom ? (
           <TextInput
+            testID="ingredient-registration.custom-name.input"
             value={item.name}
             onChangeText={(v) => onUpdate({ name: v })}
             placeholder="재료 이름 입력"

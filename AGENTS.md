@@ -7,6 +7,7 @@
 - 작업 전 `ARCHITECTURE.md`와 해당 작업의 관련 문서를 먼저 읽는다.
 - 코드, 문서, API 계약이 충돌하면 현재 코드와 실제 실행 결과를 우선 확인한다.
 - 확인되지 않은 내용은 추측하지 않고 `TODO` 또는 `확인 필요`로 남긴다.
+- 코드 변경 후 최소 정적 검증은 `npm run verify`로 실행한다.
 
 ## 먼저 읽을 문서
 
@@ -44,7 +45,7 @@
 | 로그인, 회원가입, 구글 OAuth, 탈퇴 | `docs/product/auth.md`, `docs/frontend/api-contracts.md` |
 | 알림함, 배지, 푸시 탭 라우팅 | `docs/product/notification.md`, `docs/frontend/state-management.md` |
 | UI 토큰/컴포넌트 스타일 | `docs/frontend/design-system.md` |
-| 린트/수동 검증 | `docs/quality/verification.md` |
+| 린트/타입체크/수동 검증 | `docs/quality/verification.md` |
 
 ## 에이전트 작성 원칙
 

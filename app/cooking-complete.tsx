@@ -19,11 +19,13 @@ import {
   Spacing,
   FontSize,
   FontWeight,
+  Glass,
+  GlassAction,
   Radius,
-  Shadows,
   LetterSpacing,
 } from "@/constants/theme";
 import { ErrorScreen } from "@/components/ErrorScreen";
+import { GlassBottomBar } from "@/components/GlassBottomBar";
 import { useToast } from "@/components/Toast";
 import { getErrorMessage } from "@/services/api";
 import { completeCooking, getRecipeDetail } from "@/services/recipes";
@@ -319,11 +321,9 @@ export default function CookingCompleteScreen() {
       </ScrollView>
 
       {/* ── Bottom CTA ── */}
-      <View
-        style={[
-          styles.bottomArea,
-          { paddingBottom: Math.max(insets.bottom, 12) },
-        ]}
+      <GlassBottomBar
+        contentStyle={styles.bottomArea}
+        paddingBottomMin={Glass.bottomBarPaddingBottomMin}
       >
         <Pressable
           onPress={handleComplete}
@@ -348,7 +348,7 @@ export default function CookingCompleteScreen() {
             </Text>
           )}
         </Pressable>
-      </View>
+      </GlassBottomBar>
 
       {/* ── Confetti ── */}
       {showConfetti && (
@@ -414,7 +414,7 @@ const styles = StyleSheet.create({
   // Scroll
   scrollContent: {
     paddingHorizontal: Spacing.xl,
-    paddingBottom: 120,
+    paddingBottom: 112,
   },
 
   // Hero
@@ -544,30 +544,16 @@ const styles = StyleSheet.create({
   // Bottom CTA
   bottomArea: {
     paddingHorizontal: Spacing.xl,
-    paddingTop: Spacing.md,
-    ...Platform.select({
-      ios: {
-        backgroundColor: "rgba(255,255,255,0.80)",
-        shadowColor: "#191C1D",
-        shadowOffset: { width: 0, height: -2 },
-        shadowOpacity: 0.06,
-        shadowRadius: 8,
-      },
-      android: {
-        backgroundColor: "#FFFFFF",
-        elevation: 3,
-      },
-    }),
-    borderTopLeftRadius: Radius.xxl,
-    borderTopRightRadius: Radius.xxl,
+    paddingTop: Glass.bottomBarContentPaddingTop,
   },
   ctaButton: {
-    backgroundColor: Colors.primary,
+    height: Glass.bottomBarActionHeight,
+    backgroundColor: GlassAction.primaryBackground,
     borderRadius: Radius.xl,
-    paddingVertical: Spacing.base,
     alignItems: "center",
     justifyContent: "center",
-    ...Shadows.fab,
+    ...GlassAction.topHighlight,
+    ...GlassAction.elevated,
   },
   ctaButtonDisabled: {
     backgroundColor: Colors.surfaceContainerHigh,

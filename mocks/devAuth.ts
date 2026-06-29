@@ -19,7 +19,10 @@ import type { UserInfo } from "@/services/api";
 export const MOCK_USER: UserInfo = {
   id: 0,
   email: "dev@bypass.com",
+  nickname: "개발 사용자",
   role: "USER",
+  provider: "LOCAL",
+  isNotificationEnabled: true,
 };
 
 /**

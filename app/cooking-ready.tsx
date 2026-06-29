@@ -16,12 +16,14 @@ import {
   Spacing,
   FontSize,
   FontWeight,
+  Glass,
+  GlassAction,
   Radius,
-  Shadows,
   LetterSpacing,
 } from "@/constants/theme";
 import { ConfirmModal } from "@/components/ConfirmModal";
 import { ErrorScreen } from "@/components/ErrorScreen";
+import { GlassBottomBar } from "@/components/GlassBottomBar";
 import { getRecipeDetail, type RecipeDetailDto } from "@/services/recipes";
 import { getErrorMessage } from "@/services/api";
 import { formatAmount } from "@/utils/recipeServings";
@@ -222,11 +224,9 @@ export default function CookingReadyScreen() {
       </ScrollView>
 
       {/* ── Bottom CTA ── */}
-      <View
-        style={[
-          styles.bottomArea,
-          { paddingBottom: Math.max(insets.bottom, 16) + 12 },
-        ]}
+      <GlassBottomBar
+        contentStyle={styles.bottomArea}
+        paddingBottomMin={Glass.bottomBarPaddingBottomMin}
       >
         <Pressable
           onPress={() =>
@@ -243,7 +243,7 @@ export default function CookingReadyScreen() {
           <Text style={styles.ctaText}>바로 요리하러 가기</Text>
           <Ionicons name="play" size={18} color={Colors.onPrimary} />
         </Pressable>
-      </View>
+      </GlassBottomBar>
 
       {/* ── Exit Confirm Modal ── */}
       <ConfirmModal
@@ -321,7 +321,7 @@ const styles = StyleSheet.create({
   // Scroll
   scrollContent: {
     paddingHorizontal: Spacing.xl,
-    paddingBottom: 140,
+    paddingBottom: 120,
     alignItems: "center",
   },
 
@@ -447,35 +447,21 @@ const styles = StyleSheet.create({
   // Bottom CTA
   bottomArea: {
     paddingHorizontal: Spacing.xl,
-    paddingTop: Spacing.base,
-    borderTopLeftRadius: Radius.xxl,
-    borderTopRightRadius: Radius.xxl,
-    ...Platform.select({
-      ios: {
-        backgroundColor: "rgba(255,255,255,0.80)",
-        shadowColor: "#191C1D",
-        shadowOffset: { width: 0, height: -2 },
-        shadowOpacity: 0.06,
-        shadowRadius: 8,
-      },
-      android: {
-        backgroundColor: "#FFFFFF",
-        elevation: 3,
-      },
-    }),
+    paddingTop: Glass.bottomBarContentPaddingTop,
   },
   // cooking-step의 navBtnPrimary와 통일 — gradient/큰 텍스트로 인한 시각적
   // 과중을 덜고 두 화면이 같은 톤의 primary CTA를 갖도록. "시작" 강조는
   // play 아이콘으로 유지.
   ctaButton: {
-    height: 56,
+    height: Glass.bottomBarActionHeight,
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "center",
     gap: Spacing.xs,
     borderRadius: Radius.xl,
-    backgroundColor: Colors.primary,
-    ...Shadows.fab,
+    backgroundColor: GlassAction.primaryBackground,
+    ...GlassAction.topHighlight,
+    ...GlassAction.elevated,
   },
   ctaText: {
     fontSize: FontSize.bodyLg,

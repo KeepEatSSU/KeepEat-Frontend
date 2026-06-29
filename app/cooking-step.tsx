@@ -15,12 +15,15 @@ import {
   Spacing,
   FontSize,
   FontWeight,
+  Glass,
+  GlassAction,
   Radius,
   Shadows,
   LetterSpacing,
 } from "@/constants/theme";
 import { ConfirmModal } from "@/components/ConfirmModal";
 import { ErrorScreen } from "@/components/ErrorScreen";
+import { GlassBottomBar } from "@/components/GlassBottomBar";
 import { getRecipeDetail, type RecipeDetailDto } from "@/services/recipes";
 import { getErrorMessage } from "@/services/api";
 
@@ -113,7 +116,7 @@ function RichInstruction({
 function useTimer() {
   const [remaining, setRemaining] = useState(0);
   const [isRunning, setIsRunning] = useState(false);
-  const intervalRef = useRef<ReturnType<typeof setInterval>>();
+  const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   useEffect(() => {
     if (isRunning && remaining > 0) {
@@ -128,7 +131,7 @@ function useTimer() {
       }, 1000);
     }
     return () => {
-      if (intervalRef.current) clearInterval(intervalRef.current);
+      if (intervalRef.current !== null) clearInterval(intervalRef.current);
     };
   }, [isRunning, remaining]);
 
@@ -358,11 +361,9 @@ export default function CookingStepScreen() {
       </View>
 
       {/* ── Bottom Navigation ── */}
-      <View
-        style={[
-          styles.bottomNav,
-          { paddingBottom: Math.max(insets.bottom, 16) + 8 },
-        ]}
+      <GlassBottomBar
+        contentStyle={styles.bottomNav}
+        paddingBottomMin={Glass.bottomBarPaddingBottomMin}
       >
         <Pressable
           onPress={goPrev}
@@ -408,7 +409,7 @@ export default function CookingStepScreen() {
             />
           )}
         </Pressable>
-      </View>
+      </GlassBottomBar>
 
       {/* ── Exit Confirm ── */}
       <ConfirmModal
@@ -486,6 +487,7 @@ const styles = StyleSheet.create({
   contentArea: {
     flex: 1,
     paddingHorizontal: Spacing.xl,
+    paddingBottom: 112,
     justifyContent: "center",
   },
 
@@ -591,35 +593,21 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     gap: Spacing.md,
     paddingHorizontal: Spacing.xl,
-    paddingTop: Spacing.base,
-    ...Platform.select({
-      ios: {
-        backgroundColor: "rgba(255,255,255,0.80)",
-        shadowColor: "#191C1D",
-        shadowOffset: { width: 0, height: -2 },
-        shadowOpacity: 0.06,
-        shadowRadius: 8,
-      },
-      android: {
-        backgroundColor: "#FFFFFF",
-        elevation: 3,
-      },
-    }),
-    borderTopLeftRadius: Radius.xxl,
-    borderTopRightRadius: Radius.xxl,
+    paddingTop: Glass.bottomBarContentPaddingTop,
   },
   navBtn: {
     flex: 1,
-    height: 56,
+    height: Glass.bottomBarActionHeight,
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "center",
     borderRadius: Radius.xl,
     gap: Spacing.xs,
+    ...GlassAction.topHighlight,
+    ...GlassAction.elevated,
   },
   navBtnPrimary: {
-    backgroundColor: Colors.primary,
-    ...Shadows.fab,
+    backgroundColor: GlassAction.primaryBackground,
   },
   navBtnSecondary: {
     backgroundColor: Colors.secondaryContainer,

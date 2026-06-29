@@ -13,6 +13,7 @@ import { useRouter, useLocalSearchParams } from "expo-router";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { Ionicons } from "@expo/vector-icons";
 import { ConfirmModal } from "@/components/ConfirmModal";
+import { GlassBottomBar } from "@/components/GlassBottomBar";
 import { IngredientPickerSheet } from "@/components/IngredientPickerSheet";
 import { ExpandableDatePicker } from "@/components/ExpandableDatePicker";
 import { QuickExpiryPicker } from "@/components/QuickExpiryPicker";
@@ -24,6 +25,8 @@ import {
   Spacing,
   FontSize,
   FontWeight,
+  Glass,
+  GlassAction,
   Radius,
   Shadows,
   LetterSpacing,
@@ -509,11 +512,9 @@ function DetailEditor({
       </ScrollView>
 
       {/* ── Bottom-fixed save action ── */}
-      <View
-        style={[
-          styles.saveBtnArea,
-          { paddingBottom: Math.max(insets.bottom, Spacing.md) },
-        ]}
+      <GlassBottomBar
+        contentStyle={styles.saveBtnArea}
+        paddingBottomMin={Glass.bottomBarPaddingBottomMin}
       >
         <Pressable
           onPress={handleSaveAndExit}
@@ -538,7 +539,7 @@ function DetailEditor({
             수정 완료
           </Text>
         </Pressable>
-      </View>
+      </GlassBottomBar>
 
       {/* ── Unsaved-changes Modal — surfaces on back when there are pending edits ── */}
       <ConfirmModal
@@ -615,33 +616,31 @@ const styles = StyleSheet.create({
     color: Colors.onSurface,
   },
 
-  // Scroll — flex:1 so the save-action area sticks to the bottom even when
-  // content is short. ScrollView fills the gap between header and save area.
+  // Scroll — bottom glass action overlays the content; leave breathing room
+  // so the final controls can scroll above the button.
   scroll: {
     flex: 1,
   },
   scrollContent: {
     paddingHorizontal: Spacing.xl,
-    paddingBottom: Spacing.xl,
+    paddingBottom: 112,
   },
 
   // ── Bottom save action ──
-  // Normal-flow last child of the screen (not absolute) so the ScrollView
-  // above can flex into the remaining space without an explicit bottom-pad.
   saveBtnArea: {
     paddingHorizontal: Spacing.xl,
-    paddingTop: Spacing.md,
-    backgroundColor: Colors.surface,
+    paddingTop: Glass.bottomBarContentPaddingTop,
   },
   saveBtn: {
-    height: 56,
+    height: Glass.bottomBarActionHeight,
     borderRadius: Radius.xl,
     alignItems: "center",
     justifyContent: "center",
+    ...GlassAction.topHighlight,
+    ...GlassAction.elevated,
   },
   saveBtnActive: {
-    backgroundColor: Colors.primary,
-    ...Shadows.fab,
+    backgroundColor: GlassAction.primaryBackground,
   },
   saveBtnDisabled: {
     backgroundColor: Colors.surfaceContainerHigh,

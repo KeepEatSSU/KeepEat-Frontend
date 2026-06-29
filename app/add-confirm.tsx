@@ -1,6 +1,7 @@
 import { IngredientPickerSheet } from "@/components/IngredientPickerSheet";
 import { IngredientEditCard } from "@/components/IngredientEditCard";
 import { ConfirmModal } from "@/components/ConfirmModal";
+import { GlassBottomBar } from "@/components/GlassBottomBar";
 import { ExpandableDatePicker } from "@/components/ExpandableDatePicker";
 import { useToast } from "@/components/Toast";
 import { Ionicons } from "@expo/vector-icons";
@@ -8,8 +9,9 @@ import {
   Colors,
   FontSize,
   FontWeight,
+  Glass,
+  GlassAction,
   Radius,
-  Shadows,
   Spacing,
 } from "@/constants/theme";
 import type { IngredientDraft } from "@/constants/domain";
@@ -298,11 +300,9 @@ export default function AddConfirmScreen() {
       </KeyboardAvoidingView>
 
       {/* ── Bottom Actions ── */}
-      <View
-        style={[
-          styles.bottomBar,
-          { paddingBottom: Math.max(insets.bottom, 16) + 8 },
-        ]}
+      <GlassBottomBar
+        contentStyle={styles.bottomBar}
+        paddingBottomMin={Glass.bottomBarPaddingBottomMin}
       >
         <Pressable
           onPress={() => setIsCancelModalVisible(true)}
@@ -343,7 +343,7 @@ export default function AddConfirmScreen() {
             </>
           )}
         </Pressable>
-      </View>
+      </GlassBottomBar>
 
       {/* ── Cancel Confirm Modal ── */}
       <ConfirmModal
@@ -422,17 +422,17 @@ const styles = StyleSheet.create({
     alignItems: "center",
     gap: Spacing.md,
     paddingHorizontal: Spacing.xl,
-    paddingTop: Spacing.base,
-    backgroundColor: Colors.glassBackground,
-    ...Shadows.ambient,
+    paddingTop: Glass.bottomBarContentPaddingTop,
   },
   cancelBtn: {
-    height: 56,
+    height: Glass.bottomBarActionHeight,
     paddingHorizontal: Spacing.xl,
     borderRadius: Radius.xl,
     backgroundColor: Colors.secondaryContainer,
     alignItems: "center",
     justifyContent: "center",
+    ...GlassAction.topHighlight,
+    ...GlassAction.elevated,
   },
   cancelBtnText: {
     fontSize: FontSize.bodyLg,
@@ -441,13 +441,15 @@ const styles = StyleSheet.create({
   },
   confirmBtn: {
     flex: 1,
-    height: 56,
+    height: Glass.bottomBarActionHeight,
     borderRadius: Radius.xl,
-    backgroundColor: Colors.primary,
+    backgroundColor: GlassAction.primaryBackground,
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "center",
     gap: Spacing.sm,
+    ...GlassAction.topHighlight,
+    ...GlassAction.elevated,
   },
   confirmBtnDisabled: {
     backgroundColor: Colors.surfaceContainerHighest,

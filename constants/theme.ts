@@ -141,6 +141,56 @@ export const GhostBorder = {
 export const Glass = {
   backgroundColor: Colors.glassBackground,
   backdropBlur: 20,
+  bottomBarTopRadius: 20,
+  bottomBarPaddingBottomMin: 8,
+  bottomBarContentPaddingTop: 8,
+  bottomBarActionHeight: 52,
+  bottomBarSecondaryActionMinHeight: 30,
+  bottomBarSecondaryActionGap: 0,
+  bottomBarSecondaryActionOverlap: 14,
+  bottomBarGradient: [
+    "rgba(255, 255, 255, 0.70)",
+    "rgba(255, 255, 255, 0.82)",
+    "rgba(255, 255, 255, 0.88)",
+  ] as const,
+  bottomBarGradientStart: { x: 0, y: 0 },
+  bottomBarGradientEnd: { x: 0, y: 1 },
+  bottomBarSurfaceHighlight: {
+    borderTopWidth: 1,
+    borderTopColor: "rgba(255, 255, 255, 0.32)",
+  },
+  bottomBarSurfaceShadow: Platform.select({
+    ios: {
+      shadowColor: "#191C1D",
+      shadowOffset: { width: 0, height: -2 },
+      shadowOpacity: 0.08,
+      shadowRadius: 10,
+    },
+    android: {
+      elevation: 3,
+    },
+    default: {},
+  }),
+} as const;
+
+export const GlassAction = {
+  primaryBackground: "rgba(0, 109, 55, 0.95)",
+  topHighlight: {
+    borderTopWidth: 1,
+    borderTopColor: "rgba(255, 255, 255, 0.28)",
+  },
+  elevated: Platform.select({
+    ios: {
+      shadowColor: "#191C1D",
+      shadowOffset: { width: 0, height: 9 },
+      shadowOpacity: 0.10,
+      shadowRadius: 20,
+    },
+    android: {
+      elevation: 4,
+    },
+    default: {},
+  }),
 } as const;
 
 // ─── Border Radius ────────────────────────────────────────────────────────────

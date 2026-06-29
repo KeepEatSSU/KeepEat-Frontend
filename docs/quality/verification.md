@@ -11,9 +11,13 @@ npm run ios
 npm run android
 npm run web
 npm run lint
+npm run typecheck
+npm run verify
 ```
 
-현재 테스트 전용 스크립트는 확인되지 않았다.
+`npm run verify`는 최소 정적 검증 하네스다. 내부에서 `npm run lint`를 먼저 실행하고, 성공하면 `npm run typecheck`를 실행한다. 실패 시 즉시 non-zero exit code로 종료한다.
+
+현재 단위 테스트/E2E 테스트 전용 스크립트는 확인되지 않았다.
 
 ## 개발 실행 주의
 
@@ -32,10 +36,12 @@ README 기준:
 
 코드 변경이 있는 경우:
 
-1. `npm run lint`
+1. `npm run verify`
 2. 변경 화면 수동 실행
 3. 관련 API 성공/실패 케이스 확인
 4. 인증 만료 또는 401 영향을 받는 변경이면 refresh/logout 흐름 확인
+
+`npm run typecheck`는 `tsconfig.verify.json`을 사용한다. Expo 기본 `tsconfig.json`은 유지하고, 현재 앱 검증 대상이 아닌 `app-example/`, native 산출물, `node_modules`는 검증 범위에서 제외한다.
 
 ## 주요 수동 시나리오
 

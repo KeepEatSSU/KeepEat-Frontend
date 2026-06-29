@@ -132,13 +132,13 @@ interface ExpandableDatePickerProps {
 
 // ─── Custom day renderer (Task 2: today vs selected hierarchy) ────────────────
 
-type DayState = "selected" | "disabled" | "today" | "";
+type DayState = "selected" | "disabled" | "inactive" | "today" | "";
 
 interface DayComponentProps {
   date?: DateData;
   state?: DayState;
   marking?: { selected?: boolean };
-  onPress?: (date: DateData) => void;
+  onPress?: (date?: DateData) => void;
 }
 
 function DayCell({ date, state, marking, onPress }: DayComponentProps) {
