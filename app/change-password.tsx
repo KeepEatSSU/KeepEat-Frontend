@@ -38,7 +38,7 @@ const PW_COMPLEXITY_REGEX =
 export default function ChangePasswordScreen() {
   const router = useRouter();
   const insets = useSafeAreaInsets();
-  const { showToast } = useToast();
+  const { showTopToast } = useToast();
 
   // One ref per field for "next" focus chaining. This is the same pattern
   // login.tsx uses (email → password). Do NOT replicate signup.tsx's chaining
@@ -53,6 +53,7 @@ export default function ChangePasswordScreen() {
   const [showNew, setShowNew] = useState(false);
   const [showConfirm, setShowConfirm] = useState(false);
   const [submitting, setSubmitting] = useState(false);
+  const [formError, setFormError] = useState("");
 
   const isCurrentFilled = currentPassword.length > 0;
   const isPwLengthOk = PW_LENGTH_REGEX.test(newPassword);
@@ -73,14 +74,20 @@ export default function ChangePasswordScreen() {
     if (!canSubmit) return;
     Keyboard.dismiss();
     setSubmitting(true);
+    setFormError("");
     try {
       await changePassword(currentPassword, newPassword);
-      showToast("비밀번호가 변경되었어요");
+      showTopToast({ message: "비밀번호가 변경되었어요", variant: "success" });
       router.back();
     } catch (e) {
       // 백엔드가 400에 "현재 비밀번호가 일치하지 않습니다." 등 친화 message를
       // 실어보내므로 getErrorMessage로 일원화. 그 외 status는 폴백 노출.
-      showToast(getErrorMessage(e, "비밀번호 변경에 실패했어요. 잠시 후 다시 시도해주세요"));
+      setFormError(
+        getErrorMessage(
+          e,
+          "비밀번호 변경에 실패했어요. 잠시 후 다시 시도해주세요",
+        ),
+      );
     } finally {
       setSubmitting(false);
     }
@@ -132,7 +139,10 @@ export default function ChangePasswordScreen() {
                 />
                 <TextInput
                   value={currentPassword}
-                  onChangeText={setCurrentPassword}
+                  onChangeText={(next) => {
+                    setCurrentPassword(next);
+                    setFormError("");
+                  }}
                   placeholder="현재 비밀번호"
                   placeholderTextColor={Colors.outline}
                   style={styles.input}
@@ -163,7 +173,10 @@ export default function ChangePasswordScreen() {
                 <TextInput
                   ref={newRef}
                   value={newPassword}
-                  onChangeText={setNewPassword}
+                  onChangeText={(next) => {
+                    setNewPassword(next);
+                    setFormError("");
+                  }}
                   placeholder="새 비밀번호"
                   placeholderTextColor={Colors.outline}
                   style={styles.input}
@@ -230,7 +243,10 @@ export default function ChangePasswordScreen() {
                 <TextInput
                   ref={confirmRef}
                   value={confirmPassword}
-                  onChangeText={setConfirmPassword}
+                  onChangeText={(next) => {
+                    setConfirmPassword(next);
+                    setFormError("");
+                  }}
                   placeholder="새 비밀번호 다시 입력"
                   placeholderTextColor={Colors.outline}
                   style={styles.input}
@@ -252,6 +268,17 @@ export default function ChangePasswordScreen() {
                 </Text>
               )}
             </View>
+
+            {formError !== "" && (
+              <View style={styles.formErrorRow}>
+                <Ionicons
+                  name="alert-circle"
+                  size={16}
+                  color={Colors.error}
+                />
+                <Text style={styles.formErrorText}>{formError}</Text>
+              </View>
+            )}
 
             {/* Submit */}
             <Pressable
@@ -366,6 +393,21 @@ const styles = StyleSheet.create({
     fontWeight: FontWeight.medium,
     color: Colors.error,
     marginTop: -2,
+  },
+  formErrorRow: {
+    flexDirection: "row",
+    alignItems: "flex-start",
+    gap: Spacing.sm,
+    padding: Spacing.md,
+    borderRadius: Radius.lg,
+    backgroundColor: Colors.errorContainer,
+  },
+  formErrorText: {
+    flex: 1,
+    fontSize: FontSize.bodySm,
+    lineHeight: 18,
+    fontWeight: FontWeight.semiBold,
+    color: Colors.error,
   },
 
   // Checklist

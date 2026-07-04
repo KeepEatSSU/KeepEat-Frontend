@@ -57,7 +57,7 @@ const CAL_NO_LIMIT = 1500;
 export default function ExploreScreen() {
   const router = useRouter();
   const insets = useSafeAreaInsets();
-  const { showToast } = useToast();
+  const { showTopToast } = useToast();
 
   const [recipes, setRecipes] = useState<RecipeListItem[]>([]);
   const [cursor, setCursor] = useState<string | null>(null);
@@ -139,11 +139,14 @@ export default function ExploreScreen() {
       setHasNext(res.hasNext);
     } catch (e) {
       if (requestIdRef.current !== myRequestId) return;
-      showToast(getErrorMessage(e, "다음 페이지를 불러오지 못했어요"));
+      showTopToast({
+        message: getErrorMessage(e, "다음 페이지를 불러오지 못했어요"),
+        variant: "error",
+      });
     } finally {
       if (requestIdRef.current === myRequestId) setLoadingMore(false);
     }
-  }, [hasNext, loadingMore, loading, cursor, searchQuery, showToast]);
+  }, [hasNext, loadingMore, loading, cursor, searchQuery, showTopToast]);
 
   // Debounced search-on-typing. Also drives the initial mount load (empty
   // query → first page without keyword). Cleanup cancels pending fires
@@ -212,7 +215,10 @@ export default function ExploreScreen() {
       setRecipes((prev) =>
         prev.map((r) => (r.recipeId === recipeId ? original : r)),
       );
-      showToast(getErrorMessage(e, "반응 처리에 실패했어요"));
+      showTopToast({
+        message: getErrorMessage(e, "반응 처리에 실패했어요"),
+        variant: "error",
+      });
     }
   };
 

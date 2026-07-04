@@ -57,7 +57,7 @@ function createEmptyDraft(): IngredientDraft {
 export default function AddConfirmScreen() {
   const navigation = useNavigation();
   const insets = useSafeAreaInsets();
-  const { showToast } = useToast();
+  const { showTopToast } = useToast();
   const { snapshot } = useIngredientMaster();
   const { mode } = useLocalSearchParams<{ mode?: string }>();
 
@@ -74,6 +74,7 @@ export default function AddConfirmScreen() {
   });
   const [purchaseDate, setPurchaseDate] = useState(new Date());
   const [submitting, setSubmitting] = useState(false);
+  const [validationError, setValidationError] = useState("");
 
   // Modal state
   const [isCancelModalVisible, setIsCancelModalVisible] = useState(false);
@@ -96,16 +97,19 @@ export default function AddConfirmScreen() {
   }, []);
 
   const updateItem = (id: string, patch: Partial<IngredientDraft>) => {
+    setValidationError("");
     setItems((prev) =>
       prev.map((it) => (it.id === id ? { ...it, ...patch } : it)),
     );
   };
 
   const deleteItem = (id: string) => {
+    setValidationError("");
     setItems((prev) => prev.filter((it) => it.id !== id));
   };
 
   const addEmpty = () => {
+    setValidationError("");
     // Add a new empty draft and immediately open the ingredient picker on
     // it — saves the user a second tap. If they back out of the picker the
     // empty card remains (deletable via the card's own 삭제하기 button), so
@@ -152,11 +156,12 @@ export default function AddConfirmScreen() {
       (it) => !it.isCustom && it.ingredientId == null,
     );
     if (unmatched) {
-      showToast("매칭이 필요한 항목이 있어요. 식재료를 선택해주세요");
+      setValidationError("매칭이 필요한 항목이 있어요. 식재료를 선택해주세요");
       return;
     }
 
     setSubmitting(true);
+    setValidationError("");
     try {
       // 화면 단위 purchaseDate를 함수에 직접 전달 — 함수가 그걸 anchor로
       // expiryDate 폴백(미입력 시 +7일)도 계산하므로 두 값이 일관됨.
@@ -164,10 +169,19 @@ export default function AddConfirmScreen() {
         mapIngredientToCreateRequest(draft, purchaseDate),
       );
       await createIngredients(requests);
-      showToast(`${items.length}개를 냉장고에 담았어요`);
+      showTopToast({
+        message: `${items.length}개를 냉장고에 담았어요`,
+        variant: "success",
+      });
       resetToHome();
     } catch (e) {
-      showToast(getErrorMessage(e, "등록하지 못했어요. 잠시 후 다시 시도해 주세요"));
+      showTopToast({
+        message: getErrorMessage(
+          e,
+          "등록하지 못했어요. 잠시 후 다시 시도해 주세요",
+        ),
+        variant: "error",
+      });
     } finally {
       setSubmitting(false);
     }
@@ -180,6 +194,7 @@ export default function AddConfirmScreen() {
 
   const handleCategorySelect = (entry: { id: number; name: string }) => {
     if (!editingItemId) return;
+    setValidationError("");
 
     // Inspect the picked master's storage options to decide whether storage
     // can be auto-selected. Unambiguous masters (즉석밥 → 실온만) auto-fill;
@@ -227,6 +242,7 @@ export default function AddConfirmScreen() {
     if (!editingItemId) return;
     const target = items.find((it) => it.id === editingItemId);
     if (!target) return;
+    setValidationError("");
     // Mirror IngredientEditCard's toggle-ON logic: back up the current master
     // link + nickname + name so the user can toggle back to OFF later, and
     // overwrite `name` with the picker's search query.
@@ -284,6 +300,19 @@ export default function AddConfirmScreen() {
               onCategoryPress={() => openCategoryPicker(item.id)}
             />
           ))}
+
+          {validationError !== "" && (
+            <View style={styles.inlineValidation}>
+              <Ionicons
+                name="alert-circle"
+                size={17}
+                color={Colors.error}
+              />
+              <Text style={styles.inlineValidationText}>
+                {validationError}
+              </Text>
+            </View>
+          )}
 
           {/* Add more */}
           <Pressable
@@ -414,6 +443,21 @@ const styles = StyleSheet.create({
     fontSize: FontSize.titleSm,
     fontWeight: FontWeight.bold,
     color: Colors.onSurfaceVariant,
+  },
+  inlineValidation: {
+    flexDirection: "row",
+    alignItems: "flex-start",
+    gap: Spacing.sm,
+    padding: Spacing.md,
+    borderRadius: Radius.lg,
+    backgroundColor: Colors.errorContainer,
+  },
+  inlineValidationText: {
+    flex: 1,
+    fontSize: FontSize.bodySm,
+    lineHeight: 18,
+    fontWeight: FontWeight.semiBold,
+    color: Colors.error,
   },
 
   // Bottom bar

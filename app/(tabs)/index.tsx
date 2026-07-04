@@ -273,7 +273,7 @@ const gridStyles = StyleSheet.create({
 export default function FridgeScreen() {
   const router = useRouter();
   const insets = useSafeAreaInsets();
-  const { showToast } = useToast();
+  const { showTopToast } = useToast();
   const { markTypeRead } = useNotifications();
   const { snapshot } = useIngredientMaster();
 
@@ -391,11 +391,20 @@ export default function FridgeScreen() {
     setSelectMode(false);
 
     if (failed === targets.length) {
-      showToast("삭제하지 못했어요. 잠시 후 다시 시도해 주세요");
+      showTopToast({
+        message: "삭제하지 못했어요. 잠시 후 다시 시도해 주세요",
+        variant: "error",
+      });
     } else if (failed > 0) {
-      showToast(`${succeeded}개 삭제, ${failed}개 실패`);
+      showTopToast({
+        message: `${succeeded}개 삭제, ${failed}개 실패`,
+        variant: "warning",
+      });
     } else {
-      showToast(`${succeeded}개를 비웠어요`);
+      showTopToast({
+        message: `${succeeded}개를 비웠어요`,
+        variant: "success",
+      });
     }
 
     // Refetch to re-sync with server (cleans up any drift).

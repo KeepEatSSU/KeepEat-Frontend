@@ -30,7 +30,7 @@ const SHOW_DELETE_ACCOUNT = true;
 
 export default function MyPageScreen() {
   const { user, logout, deleteAccount } = useAuth();
-  const { showToast } = useToast();
+  const { showTopToast } = useToast();
   const router = useRouter();
 
   // 알림 행은 OS 권한의 거울 — 서버 isNotificationEnabled flag는 제어하지 않는다
@@ -78,7 +78,7 @@ export default function MyPageScreen() {
 
   const openOsSettings = () => {
     Linking.openSettings().catch(() => {
-      showToast("설정 앱을 열 수 없어요");
+      showTopToast({ message: "설정 앱을 열 수 없어요", variant: "error" });
     });
   };
 
@@ -132,7 +132,7 @@ export default function MyPageScreen() {
     // Local caches that don't belong to the next user. Token clearing +
     // setUser(null) is already handled inside deleteAccount.
     await clearRecentIngredients();
-    showToast("탈퇴가 완료되었어요");
+    showTopToast({ message: "탈퇴가 완료되었어요", variant: "success" });
   };
 
   const handleDeleteGoogleConfirm = async () => {
@@ -143,7 +143,10 @@ export default function MyPageScreen() {
       setGoogleConfirmVisible(false);
       await finishDeleteSuccess();
     } catch (err) {
-      showToast(getErrorMessage(err, "탈퇴에 실패했어요"));
+      showTopToast({
+        message: getErrorMessage(err, "탈퇴에 실패했어요"),
+        variant: "error",
+      });
     } finally {
       setDeleteSubmitting(false);
     }
@@ -157,7 +160,10 @@ export default function MyPageScreen() {
       setPasswordModalVisible(false);
       await finishDeleteSuccess();
     } catch (err) {
-      showToast(getErrorMessage(err, "탈퇴에 실패했어요"));
+      showTopToast({
+        message: getErrorMessage(err, "탈퇴에 실패했어요"),
+        variant: "error",
+      });
     } finally {
       setDeleteSubmitting(false);
     }

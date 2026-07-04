@@ -43,7 +43,7 @@ const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 export default function SignupScreen() {
   const router = useRouter();
   const insets = useSafeAreaInsets();
-  const { showToast } = useToast();
+  const { showTopToast } = useToast();
 
   const [email, setEmail] = useState("");
 
@@ -70,7 +70,7 @@ export default function SignupScreen() {
       await sendEmailCode(email.trim());
       setCodeSent(true);
       setVerifyCode("");
-      showToast("인증번호를 전송했어요");
+      showTopToast({ message: "인증번호를 전송했어요", variant: "success" });
     } catch (e) {
       // 백엔드가 "이미 가입된 이메일입니다." 같은 친화 메시지를 message
       // 필드에 실어 보내므로 그대로 노출 (없으면 일반 폴백). 이메일 입력
@@ -102,7 +102,14 @@ export default function SignupScreen() {
         pathname: "/signup-profile",
         params: { email: email.trim() },
       });
-      setTimeout(() => showToast("이메일 인증이 완료되었어요"), 400);
+      setTimeout(
+        () =>
+          showTopToast({
+            message: "이메일 인증이 완료되었어요",
+            variant: "success",
+          }),
+        400,
+      );
     } catch (e) {
       setVerifyError(getErrorMessage(e, "인증번호가 일치하지 않아요"));
     } finally {

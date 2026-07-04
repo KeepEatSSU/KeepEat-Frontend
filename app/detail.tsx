@@ -158,7 +158,7 @@ function deriveInit(found: Ingredient): DetailInit {
 export default function DetailScreen() {
   const router = useRouter();
   const insets = useSafeAreaInsets();
-  const { showToast } = useToast();
+  const { showTopToast } = useToast();
   const { id } = useLocalSearchParams<{ id: string }>();
 
   // ── Async resolution from server ──
@@ -211,7 +211,15 @@ export default function DetailScreen() {
     );
   }
 
-  return <DetailEditor id={id} init={init} router={router} insets={insets} showToast={showToast} />;
+  return (
+    <DetailEditor
+      id={id}
+      init={init}
+      router={router}
+      insets={insets}
+      showTopToast={showTopToast}
+    />
+  );
 }
 
 function DetailEditor({
@@ -219,13 +227,13 @@ function DetailEditor({
   init,
   router,
   insets,
-  showToast,
+  showTopToast,
 }: {
   id: string;
   init: DetailInit;
   router: ReturnType<typeof useRouter>;
   insets: ReturnType<typeof useSafeAreaInsets>;
-  showToast: (msg: string) => void;
+  showTopToast: ReturnType<typeof useToast>["showTopToast"];
 }) {
   const { snapshot } = useIngredientMaster();
 
@@ -335,11 +343,20 @@ function DetailEditor({
 
       if (Object.keys(patch).length > 0) {
         await updateIngredient(Number(id), mapIngredientToUpdateRequest(patch));
-        showToast("변경된 정보가 저장됐어요");
+        showTopToast({
+          message: "변경된 정보가 저장됐어요",
+          variant: "success",
+        });
       }
       router.back();
     } catch (e) {
-      showToast(getErrorMessage(e, "저장 중 문제가 생겼어요. 잠시 후 다시 시도해주세요"));
+      showTopToast({
+        message: getErrorMessage(
+          e,
+          "저장 중 문제가 생겼어요. 잠시 후 다시 시도해주세요",
+        ),
+        variant: "error",
+      });
     } finally {
       setSubmitting(false);
     }
@@ -356,10 +373,16 @@ function DetailEditor({
     setSubmitting(true);
     try {
       await deleteIngredient(Number(id));
-      showToast("삭제되었어요");
+      showTopToast({ message: "삭제되었어요", variant: "success" });
       router.back();
     } catch (e) {
-      showToast(getErrorMessage(e, "삭제하지 못했어요. 잠시 후 다시 시도해 주세요"));
+      showTopToast({
+        message: getErrorMessage(
+          e,
+          "삭제하지 못했어요. 잠시 후 다시 시도해 주세요",
+        ),
+        variant: "error",
+      });
     } finally {
       setSubmitting(false);
     }

@@ -172,7 +172,7 @@ export function RecipeRecommendationProvider({
     completedAt: null,
   });
 
-  const { showToast } = useToast();
+  const { showTopToast } = useToast();
   const appStateRef = useRef<AppStateStatus>(AppState.currentState);
   const onCompleteRef = useRef<(() => void) | null>(null);
 
@@ -271,7 +271,10 @@ export function RecipeRecommendationProvider({
     // 라(`clearTimeout` 후 즉시 교체) 빠른 에러가 와도 catch의 에러 토스트가
     // 안내를 자동으로 dismiss + 교체 → 두 토스트가 동시에 보일 일 없음.
     // 호출처(recipe.tsx)에서 타이밍 추측(setTimeout) 없이 결과 기반 분기.
-    showToast("레시피 생성에 최대 2분이 소요됩니다. 완료되면 알려드릴게요!");
+    showTopToast({
+      message: "레시피 생성에 최대 2분이 소요됩니다. 완료되면 알려드릴게요!",
+      variant: "info",
+    });
 
     try {
       const generated = await generateAiRecipes();
@@ -301,12 +304,24 @@ export function RecipeRecommendationProvider({
       // 400(식재료 부족)과 그 외(서버 오류)는 폴백 카피가 달라 분기 유지.
       // 두 경로 모두 getErrorMessage를 통과해 서버 message가 있으면 우선 노출.
       if (isAxiosError(error) && error.response?.status === 400) {
-        showToast(getErrorMessage(error, "식재료가 부족해요. 냉장고를 더 채워주세요!"));
+        showTopToast({
+          message: getErrorMessage(
+            error,
+            "식재료가 부족해요. 냉장고를 더 채워주세요!",
+          ),
+          variant: "warning",
+        });
       } else {
-        showToast(getErrorMessage(error, "레시피를 생성하는 중에 오류가 발생했어요."));
+        showTopToast({
+          message: getErrorMessage(
+            error,
+            "레시피를 생성하는 중에 오류가 발생했어요.",
+          ),
+          variant: "error",
+        });
       }
     }
-  }, [state.status, handleCompletion, showToast]);
+  }, [state.status, handleCompletion, showTopToast]);
 
   const markSwiping = useCallback(() => {
     setState((prev) => ({ ...prev, status: "swiping" }));

@@ -453,7 +453,7 @@ export default function RecipeSwipeScreen() {
   const router = useRouter();
   const navigation = useNavigation();
   const insets = useSafeAreaInsets();
-  const { showToast } = useToast();
+  const { showTopToast } = useToast();
   const {
     status: recommendationStatus,
     recommendedRecipes,
@@ -479,16 +479,20 @@ export default function RecipeSwipeScreen() {
     savedDtosRef.current = [];
     try {
       await saveRecipes(dtos);
-      showToast(`${dtos.length}개 레시피가 내 레시피에 저장되었어요`);
+      showTopToast({
+        message: `${dtos.length}개 레시피가 내 레시피에 저장되었어요`,
+        variant: "success",
+      });
     } catch (e) {
-      showToast(
-        getErrorMessage(
+      showTopToast({
+        message: getErrorMessage(
           e,
           "레시피 저장에 실패했어요. 잠시 후 다시 시도해 주세요",
         ),
-      );
+        variant: "error",
+      });
     }
-  }, [showToast]);
+  }, [showTopToast]);
 
   // 결과를 실제로 보여줄 때만 RECIPE_READY 읽음 처리 — 빈 안내/로딩만 뜨는
   // 경우(결과 휘발/콜드스타트 미복원)는 보류해 "결과를 못 봤는데 읽음됨" 모순을

@@ -76,7 +76,7 @@ const SORT_LABELS: Record<RecipeSortKey, string> = {
 export default function RecipeScreen() {
   const router = useRouter();
   const insets = useSafeAreaInsets();
-  const { showToast, showNotification } = useToast();
+  const { showTopToast, showNotification } = useToast();
   const { status, requestRecommendation, markSwiping, onComplete } =
     useRecipeRecommendation();
 
@@ -205,7 +205,10 @@ export default function RecipeScreen() {
       setRecipes((prev) =>
         prev.map((r) => (r.recipeId === recipeId ? original : r)),
       );
-      showToast(getErrorMessage(e, "반응 처리에 실패했어요"));
+      showTopToast({
+        message: getErrorMessage(e, "반응 처리에 실패했어요"),
+        variant: "error",
+      });
     }
   };
 
@@ -261,9 +264,15 @@ export default function RecipeScreen() {
       setRecipes((prev) => prev.filter((r) => !targetSet.has(r.recipeId)));
       setBulkDeleteModalVisible(false);
       exitSelectionMode();
-      showToast(`${targetIds.length}개 삭제되었어요`);
+      showTopToast({
+        message: `${targetIds.length}개 삭제되었어요`,
+        variant: "success",
+      });
     } catch (e) {
-      showToast(getErrorMessage(e, "삭제에 실패했어요"));
+      showTopToast({
+        message: getErrorMessage(e, "삭제에 실패했어요"),
+        variant: "error",
+      });
     } finally {
       setDeleting(false);
     }

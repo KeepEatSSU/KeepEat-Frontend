@@ -83,10 +83,11 @@ function ProcessingOverlay({
 export default function CropScreen() {
   const router = useRouter();
   const insets = useSafeAreaInsets();
-  const { showToast } = useToast();
+  const { showTopToast } = useToast();
   const { uri } = useLocalSearchParams<{ uri: string }>();
 
   const [isProcessing, setIsProcessing] = useState(false);
+  const [inlineError, setInlineError] = useState("");
   const [progress, setProgress] = useState(0);
   const [tipIndex, setTipIndex] = useState(0);
   const progressRef = useRef<ReturnType<typeof setInterval> | null>(null);
@@ -103,13 +104,17 @@ export default function CropScreen() {
         uri,
         (width, height) => {
           setImageSize({ width, height });
+          setInlineError("");
         },
         () => {
-          showToast("이미지 크기를 불러오는데 실패했습니다.");
+          showTopToast({
+            message: "이미지 크기를 불러오는데 실패했습니다.",
+            variant: "error",
+          });
         }
       );
     }
-  }, [uri]);
+  }, [uri, showTopToast]);
 
   // Gestures state
   const scale = useSharedValue(1);
@@ -173,16 +178,17 @@ export default function CropScreen() {
 
   const startProcessing = async () => {
     if (!uri) {
-      showToast("사진을 다시 선택해주세요");
+      setInlineError("사진을 다시 선택해주세요");
       return;
     }
     if (imageSize.width === 0 || layout.width === 0) {
-      showToast("이미지 로딩 중입니다. 잠시만 기다려주세요.");
+      setInlineError("이미지 로딩 중입니다. 잠시만 기다려주세요.");
       return;
     }
     if (isProcessing) return;
 
     setIsProcessing(true);
+    setInlineError("");
     setProgress(0);
     setTipIndex(0);
 
@@ -284,7 +290,7 @@ export default function CropScreen() {
         e instanceof OcrParseError
           ? e.message
           : e.message || "OCR을 처리하지 못했어요. 잠시 후 다시 시도해주세요";
-      showToast(msg);
+      showTopToast({ message: msg, variant: "error" });
     }
   };
 
@@ -319,6 +325,7 @@ export default function CropScreen() {
               width: e.nativeEvent.layout.width,
               height: e.nativeEvent.layout.height,
             });
+            setInlineError("");
           }}
         >
           {uri ? (
@@ -370,6 +377,12 @@ export default function CropScreen() {
             영역을 맞추세요 (핀치로 확대/축소)
           </Text>
         </View>
+        {inlineError !== "" && (
+          <View style={styles.inlineValidation}>
+            <Ionicons name="alert-circle" size={17} color={Colors.error} />
+            <Text style={styles.inlineValidationText}>{inlineError}</Text>
+          </View>
+        )}
       </View>
 
       {/* ── Bottom CTA ── */}
@@ -559,6 +572,23 @@ const styles = StyleSheet.create({
     fontSize: FontSize.titleSm,
     fontWeight: FontWeight.medium,
     color: Colors.onSurfaceVariant,
+  },
+  inlineValidation: {
+    width: "100%",
+    marginTop: Spacing.md,
+    flexDirection: "row",
+    alignItems: "flex-start",
+    gap: Spacing.sm,
+    padding: Spacing.md,
+    borderRadius: Radius.lg,
+    backgroundColor: Colors.errorContainer,
+  },
+  inlineValidationText: {
+    flex: 1,
+    fontSize: FontSize.bodySm,
+    lineHeight: 18,
+    fontWeight: FontWeight.semiBold,
+    color: Colors.error,
   },
   bottomArea: {
     paddingHorizontal: Spacing.xl,

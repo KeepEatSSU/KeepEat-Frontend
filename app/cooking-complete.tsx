@@ -57,7 +57,7 @@ export default function CookingCompleteScreen() {
   const router = useRouter();
   const navigation = useNavigation();
   const insets = useSafeAreaInsets();
-  const { showToast } = useToast();
+  const { showTopToast } = useToast();
   const { id } = useLocalSearchParams<{ id: string }>();
   const recipeId = Number(id);
 
@@ -133,7 +133,10 @@ export default function CookingCompleteScreen() {
     try {
       await completeCooking(recipeId);
     } catch (e) {
-      showToast(getErrorMessage(e, "요리 기록 저장에 실패했어요"));
+      showTopToast({
+        message: getErrorMessage(e, "요리 기록 저장에 실패했어요"),
+        variant: "error",
+      });
     }
 
     // 2) Delete the selected fridge items. Skip silently when nothing was
@@ -143,13 +146,16 @@ export default function CookingCompleteScreen() {
       try {
         await deleteUserIngredients(deleteIds);
       } catch (e) {
-        showToast(getErrorMessage(e, "재료 삭제에 실패했어요"));
+        showTopToast({
+          message: getErrorMessage(e, "재료 삭제에 실패했어요"),
+          variant: "error",
+        });
       }
     }
 
     // 3) Tail-end UX: toast + reset to tabs.
     setTimeout(() => {
-      showToast("맛있는 식사 되세요!");
+      showTopToast({ message: "맛있는 식사 되세요!", variant: "success" });
       navigation.dispatch(
         CommonActions.reset({
           index: 0,

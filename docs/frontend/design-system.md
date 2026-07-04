@@ -22,6 +22,7 @@ UI 작업 전에는 이 문서를 읽은 뒤, 세부 토큰은 `constants/theme.
 - `Shadows`
 - `GhostBorder`
 - `Glass`
+- `Feedback`
 - `Radius`
 - `Spacing`
 - `StatusGlow`
@@ -46,6 +47,17 @@ UI 작업 전에는 이 문서를 읽은 뒤, 세부 토큰은 `constants/theme.
 - 시트: `AddMenuSheet`, `RecipeFilterSheet`, `RecipeSortSheet`, `FridgeCategorySheet`, `IngredientPickerSheet`
 - 카드/입력: `RecipeListCard`, `IngredientEditCard`, `CapacityInput`, `ExpandableDatePicker`, `QuickExpiryPicker`
 - 피드백: `Toast`, `ErrorScreen`
+
+## 피드백 역할
+
+`components/Toast.tsx`는 하나의 Provider에서 다음 역할을 분리한다.
+
+- `showTopToast({ message, variant })`: 성공, 실패, 저장/삭제/추가 결과, 로딩·처리 완료처럼 사용자가 즉시 수정할 필요 없는 짧은 정보성 피드백.
+- inline validation: 입력값, 매칭 누락, 이미지 준비 상태처럼 사용자가 즉시 고칠 수 있는 오류는 화면 내부에 표시한다.
+- `showNotification(message, onTap?, title?)`: foreground push 알림 전용 tappable dropdown. 상단 Toast보다 우선하며, 겹침을 피하기 위해 상단 Toast는 알림 뒤로 지연된다.
+- modal / bottom sheet: 삭제 확정, 탈퇴 등 사용자의 명시적 판단이 필요한 중요 결정에 사용한다.
+
+`BottomSnackbar`는 현재 일반 피드백에 사용하지 않는다. 향후 `Undo`, `다시 시도`, `보기`처럼 즉시 액션이 필요한 경우에만 Action Snackbar로 도입을 검토한다. 기존 `showToast`는 호환용 API로 남아 있지만 TopToast 정책을 따르며, 신규 호출은 `showTopToast(...)` 또는 inline validation을 사용한다.
 
 ## 확인된 UI 규칙
 

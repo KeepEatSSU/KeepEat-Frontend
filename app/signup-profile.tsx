@@ -47,7 +47,7 @@ const PW_COMPLEXITY_REGEX =
 export default function SignupProfileScreen() {
   const router = useRouter();
   const insets = useSafeAreaInsets();
-  const { showToast } = useToast();
+  const { showTopToast } = useToast();
   const { signUp } = useAuth();
 
   const params = useLocalSearchParams<{ email?: string }>();
@@ -104,7 +104,10 @@ export default function SignupProfileScreen() {
     setSubmitting(true);
     try {
       await signUp(email, password, nickname.trim());
-      showToast("회원가입이 완료되었습니다!");
+      showTopToast({
+        message: "회원가입이 완료되었습니다!",
+        variant: "success",
+      });
       router.replace("/(tabs)");
     } catch (e) {
       // Prefer the backend's localized message ("이미 사용 중인 이메일입니다"

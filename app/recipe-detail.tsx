@@ -287,7 +287,7 @@ const SHEET_HEIGHT = 520;
 export default function RecipeDetailScreen() {
   const router = useRouter();
   const insets = useSafeAreaInsets();
-  const { showToast } = useToast();
+  const { showTopToast } = useToast();
   const { snapshot } = useIngredientMaster();
   const { id } = useLocalSearchParams<{ id: string }>();
 
@@ -334,7 +334,13 @@ export default function RecipeDetailScreen() {
         setRecipe(mappedRecipe);
       } catch (error) {
         // toast는 폴백 카피, ErrorScreen에 동일 메시지를 헬퍼로 한 번 더 노출.
-        showToast(getErrorMessage(error, "레시피 정보를 불러오지 못했어요."));
+        showTopToast({
+          message: getErrorMessage(
+            error,
+            "레시피 정보를 불러오지 못했어요.",
+          ),
+          variant: "error",
+        });
         setIsError(true);
         setLoadError(error);
       } finally {
@@ -343,7 +349,7 @@ export default function RecipeDetailScreen() {
     };
 
     fetchRecipeDetail();
-  }, [id, showToast]);
+  }, [id, showTopToast]);
 
   const [portions, setPortions] = useState(1);
   // True while the "내 레시피에 추가" PATCH is in-flight — gates the button
@@ -429,10 +435,16 @@ export default function RecipeDetailScreen() {
       const req = mapIngredientToCreateRequest(draftItem);
       await createIngredients([req]);
       closeAddModal(() =>
-        showToast(`${draftItem.name}을(를) 냉장고에 추가했어요`),
+        showTopToast({
+          message: `${draftItem.name}을(를) 냉장고에 추가했어요`,
+          variant: "success",
+        }),
       );
     } catch (e) {
-      showToast(getErrorMessage(e, "냉장고 추가에 실패했어요"));
+      showTopToast({
+        message: getErrorMessage(e, "냉장고 추가에 실패했어요"),
+        variant: "error",
+      });
     }
   };
 
@@ -447,7 +459,10 @@ export default function RecipeDetailScreen() {
       await toggleReaction(recipe.recipeId, type);
     } catch (e) {
       setRecipe(original);
-      showToast(getErrorMessage(e, "반응 처리에 실패했어요"));
+      showTopToast({
+        message: getErrorMessage(e, "반응 처리에 실패했어요"),
+        variant: "error",
+      });
     }
   };
 
@@ -461,9 +476,15 @@ export default function RecipeDetailScreen() {
       setRecipe((prev) =>
         prev ? { ...prev, isRegisteredMyRecipe: true } : prev,
       );
-      showToast("내 레시피에 추가되었어요");
+      showTopToast({
+        message: "내 레시피에 추가되었어요",
+        variant: "success",
+      });
     } catch (e) {
-      showToast(getErrorMessage(e, "내 레시피 추가에 실패했어요"));
+      showTopToast({
+        message: getErrorMessage(e, "내 레시피 추가에 실패했어요"),
+        variant: "error",
+      });
     } finally {
       setIsAddingToMyRecipes(false);
     }
@@ -480,9 +501,15 @@ export default function RecipeDetailScreen() {
         prev ? { ...prev, isRegisteredMyRecipe: false } : prev,
       );
       setUnregisterModalVisible(false);
-      showToast("내 레시피에서 제거되었어요");
+      showTopToast({
+        message: "내 레시피에서 제거되었어요",
+        variant: "success",
+      });
     } catch (e) {
-      showToast(getErrorMessage(e, "제거에 실패했어요"));
+      showTopToast({
+        message: getErrorMessage(e, "제거에 실패했어요"),
+        variant: "error",
+      });
     } finally {
       setUnregistering(false);
     }

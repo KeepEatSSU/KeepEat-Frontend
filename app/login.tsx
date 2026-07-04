@@ -36,7 +36,7 @@ export default function LoginScreen() {
   const insets = useSafeAreaInsets();
   const passwordRef = useRef<TextInput>(null);
   const { login, loginWithTokens } = useAuth();
-  const { showToast } = useToast();
+  const { showTopToast } = useToast();
 
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
@@ -56,12 +56,18 @@ export default function LoginScreen() {
       // (e.g. "임시 비밀번호가 이메일로 발송되었습니다").
       const message = await findPassword(inputEmail);
       setFindPwModalVisible(false);
-      showToast(message || "임시 비밀번호가 이메일로 발송되었어요");
+      showTopToast({
+        message: message || "임시 비밀번호가 이메일로 발송되었어요",
+        variant: "success",
+      });
     } catch (err) {
       // Keep the modal open so the user can fix the email and retry.
       // getErrorMessage extracts only `message` from the response body —
       // never the raw payload.
-      showToast(getErrorMessage(err, "요청에 실패했어요"));
+      showTopToast({
+        message: getErrorMessage(err, "요청에 실패했어요"),
+        variant: "error",
+      });
     } finally {
       setFindPwSubmitting(false);
     }
@@ -101,7 +107,13 @@ export default function LoginScreen() {
       await loginWithTokens(tokens.accessToken, tokens.refreshToken);
       router.replace("/(tabs)");
     } catch (e) {
-      showToast(getErrorMessage(e, "구글 로그인에 실패했어요. 잠시 후 다시 시도해주세요"));
+      showTopToast({
+        message: getErrorMessage(
+          e,
+          "구글 로그인에 실패했어요. 잠시 후 다시 시도해주세요",
+        ),
+        variant: "error",
+      });
     } finally {
       setGoogleSubmitting(false);
     }

@@ -193,6 +193,53 @@ export const GlassAction = {
   }),
 } as const;
 
+// ─── Feedback Surfaces ───────────────────────────────────────────────────────
+
+export const Feedback = {
+  durationMs: {
+    top: 3200,
+    bottom: 3000,
+    notification: 4000,
+  },
+  topOffsetGap: 4,
+  bottomBarGap: 12,
+  maxWidth: 360,
+  variants: {
+    success: {
+      solidBackground: Colors.primary,
+      foreground: Colors.onPrimary,
+      softBackground: "#EAF8EF",
+      softForeground: Colors.onPrimaryContainer,
+      iconBackground: "rgba(0, 109, 55, 0.12)",
+      borderColor: "rgba(0, 109, 55, 0.16)",
+    },
+    error: {
+      solidBackground: Colors.error,
+      foreground: Colors.onError,
+      softBackground: Colors.errorContainer,
+      softForeground: Colors.error,
+      iconBackground: "rgba(186, 26, 26, 0.12)",
+      borderColor: "rgba(186, 26, 26, 0.18)",
+    },
+    info: {
+      solidBackground: Colors.onSurface,
+      foreground: Colors.onPrimary,
+      softBackground: Colors.surfaceContainerLowest,
+      softForeground: Colors.onSurface,
+      iconBackground: "rgba(25, 28, 29, 0.08)",
+      borderColor: "rgba(108, 123, 109, 0.18)",
+    },
+    warning: {
+      solidBackground: Colors.tertiary,
+      foreground: Colors.onPrimary,
+      softBackground: "#FFF0EA",
+      softForeground: Colors.onTertiaryContainer,
+      iconBackground: "rgba(152, 71, 42, 0.12)",
+      borderColor: "rgba(152, 71, 42, 0.18)",
+    },
+  },
+} as const;
+
 // ─── Border Radius ────────────────────────────────────────────────────────────
 
 export const Radius = {
