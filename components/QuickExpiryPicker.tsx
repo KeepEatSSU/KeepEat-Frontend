@@ -8,26 +8,13 @@ import {
   Radius,
 } from "@/constants/theme";
 import { type StorageType } from "@/constants/domain";
-import {
-  METRIC_TO_DAYS,
-  type ApiStorageType,
-} from "@/constants/ingredients-master";
 import { useIngredientMaster } from "@/context/IngredientMasterContext";
 import { toISODate, formatDaysApprox } from "@/utils/dateUtils";
-
-// ─── Helpers ──────────────────────────────────────────────────────────────────
-
-const STORAGE_DOMAIN_TO_API: Record<StorageType, ApiStorageType> = {
-  room: "실온",
-  fridge: "냉장",
-  frozen: "냉동",
-};
-
-function addDays(base: Date, days: number): Date {
-  const d = new Date(base);
-  d.setDate(d.getDate() + days);
-  return d;
-}
+import {
+  addDays,
+  findStorageOptionForStorage,
+  getStorageWindowDays,
+} from "@/utils/ingredientEntryRules";
 
 // ─── Props ────────────────────────────────────────────────────────────────────
 
@@ -72,27 +59,21 @@ export function QuickExpiryPicker({
     if (ingredientId == null || storage == null) return undefined;
     const opts = snapshot?.optionsByIngredientId.get(ingredientId);
     if (!opts) return undefined;
-    return opts.find(
-      (o) => o.storageType === STORAGE_DOMAIN_TO_API[storage],
-    );
+    return findStorageOptionForStorage(opts, storage);
   }, [ingredientId, storage, snapshot]);
 
   if (!match) return null;
 
-  const apply = (rawValue: number) => {
-    const days = Math.round(rawValue * METRIC_TO_DAYS[match.metric]);
+  const apply = (days: number) => {
     onPick(addDays(purchaseDate, days));
   };
-
-  const avg = (match.min + match.max) / 2;
 
   // Day counts used by both the label formatter and the date calculation
   // — same source so the chip's label and its onPick result can never drift.
   // For API-sourced data `metric` is always "Days" (multiplier 1); for seed
   // fallback the multiplier converts to days.
-  const minDays = Math.round(match.min * METRIC_TO_DAYS[match.metric]);
-  const maxDays = Math.round(match.max * METRIC_TO_DAYS[match.metric]);
-  const avgDays = Math.round(avg * METRIC_TO_DAYS[match.metric]);
+  const { min: minDays, avg: avgDays, max: maxDays } =
+    getStorageWindowDays(match);
 
   // Derive the active chip from the current expirationDate. Uses the *same*
   // formula as `apply` so clicking a chip and then comparing back hits 1-1.
@@ -115,21 +96,21 @@ export function QuickExpiryPicker({
           days={minDays}
           active={activeMetric === "min"}
           inGroup={inGroup}
-          onPress={() => apply(match.min)}
+          onPress={() => apply(minDays)}
         />
         <Btn
           prefix="평균"
           days={avgDays}
           active={activeMetric === "avg"}
           inGroup={inGroup}
-          onPress={() => apply(avg)}
+          onPress={() => apply(avgDays)}
         />
         <Btn
           prefix="최대"
           days={maxDays}
           active={activeMetric === "max"}
           inGroup={inGroup}
-          onPress={() => apply(match.max)}
+          onPress={() => apply(maxDays)}
         />
       </View>
     </View>

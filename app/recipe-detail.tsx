@@ -24,9 +24,9 @@ import {
   Shadows,
   LetterSpacing,
 } from "@/constants/theme";
-import type {
-  IngredientDraft,
-  ReactionType,
+import {
+  type IngredientDraft,
+  type ReactionType,
 } from "@/constants/domain";
 import {
   addToMyRecipes,
@@ -50,6 +50,12 @@ import { ConfirmModal } from "@/components/ConfirmModal";
 import { BottomGlassActions } from "@/components/BottomGlassActions";
 import { useToast } from "@/components/Toast";
 import { ErrorScreen } from "@/components/ErrorScreen";
+import {
+  addDays,
+  getFirstIngredientDraftValidationError,
+  resolveInitialStorageAndExpiry,
+  startOfDay,
+} from "@/utils/ingredientEntryRules";
 
 export interface MappedRecipeDetail
   extends Omit<RecipeDetailDto, "difficulty"> {
@@ -363,9 +369,16 @@ export default function RecipeDetailScreen() {
     nickname: "",
     quantity: null,
     unit: "g",
-    storage: "fridge",
+    storage: null,
     expirationDate: null,
   });
+  const [addSubmitting, setAddSubmitting] = useState(false);
+
+  const addValidationMessage = getFirstIngredientDraftValidationError(
+    draftItem,
+    snapshot,
+  )?.message ?? null;
+  const isAddToFridgeDisabled = addSubmitting || addValidationMessage !== null;
 
   const backdropOpacity = useRef(new Animated.Value(0)).current;
   const sheetTranslateY = useRef(new Animated.Value(SHEET_HEIGHT)).current;
@@ -376,6 +389,15 @@ export default function RecipeDetailScreen() {
     // gets an icon + storage defaults + appears under the right category.
     // No match → falls through as a custom ("내 재료") item.
     const masterId = snapshot?.byName.get(ingredientName)?.id;
+    const storageOptions =
+      masterId != null
+        ? (snapshot?.optionsByIngredientId.get(masterId) ?? [])
+        : [];
+    const today = startOfDay(new Date());
+    const initial = resolveInitialStorageAndExpiry(
+      storageOptions,
+      today,
+    );
     setDraftItem({
       id: String(Date.now()),
       name: ingredientName,
@@ -384,9 +406,11 @@ export default function RecipeDetailScreen() {
       isCustom: masterId == null,
       quantity: null,
       unit: "g",
-      storage: "fridge",
-      expirationDate: null,
+      storage: initial.storage,
+      expirationDate: initial.expirationDate ?? addDays(today, 7),
+      expirationManuallySet: false,
     });
+    setAddSubmitting(false);
     setAddModalVisible(true);
     backdropOpacity.setValue(0);
     sheetTranslateY.setValue(SHEET_HEIGHT);
@@ -427,20 +451,24 @@ export default function RecipeDetailScreen() {
   );
 
   const handleAddToFridge = async () => {
+    if (addSubmitting || addValidationMessage !== null) return;
+    setAddSubmitting(true);
     try {
       const req = mapIngredientToCreateRequest(draftItem);
       await createIngredients([req]);
-      closeAddModal(() =>
+      closeAddModal(() => {
+        setAddSubmitting(false);
         showTopToast({
           message: `${draftItem.name}을(를) 냉장고에 추가했어요`,
           variant: "success",
-        }),
-      );
+        });
+      });
     } catch (e) {
       showTopToast({
         message: getErrorMessage(e, "냉장고 추가에 실패했어요"),
         variant: "error",
       });
+      setAddSubmitting(false);
     }
   };
 
@@ -841,6 +869,18 @@ export default function RecipeDetailScreen() {
                 }
                 hideDelete
               />
+              {addValidationMessage !== null && (
+                <View style={styles.modalInlineValidation}>
+                  <Ionicons
+                    name="alert-circle"
+                    size={17}
+                    color={Colors.error}
+                  />
+                  <Text style={styles.modalInlineValidationText}>
+                    {addValidationMessage}
+                  </Text>
+                </View>
+              )}
             </ScrollView>
 
             <View style={styles.modalActions}>
@@ -855,14 +895,31 @@ export default function RecipeDetailScreen() {
               </Pressable>
               <Pressable
                 onPress={handleAddToFridge}
+                disabled={isAddToFridgeDisabled}
+                accessibilityRole="button"
+                accessibilityState={{ disabled: isAddToFridgeDisabled }}
                 style={({ pressed }) => [
                   styles.modalConfirmBtn,
-                  pressed && { opacity: 0.85, transform: [{ scale: 0.97 }] },
+                  isAddToFridgeDisabled && styles.modalConfirmBtnDisabled,
+                  pressed &&
+                    !isAddToFridgeDisabled && {
+                      opacity: 0.85,
+                      transform: [{ scale: 0.97 }],
+                    },
                 ]}
               >
-                <Text style={styles.modalConfirmText}>
-                  내 냉장고에 추가하기
-                </Text>
+                {addSubmitting ? (
+                  <ActivityIndicator color={Colors.onPrimary} />
+                ) : (
+                  <Text
+                    style={[
+                      styles.modalConfirmText,
+                      isAddToFridgeDisabled && styles.modalConfirmTextDisabled,
+                    ]}
+                  >
+                    내 냉장고에 추가하기
+                  </Text>
+                )}
               </Pressable>
             </View>
           </Animated.View>
@@ -1219,6 +1276,22 @@ const styles = StyleSheet.create({
   modalScroll: {
     flexGrow: 0,
   },
+  modalInlineValidation: {
+    flexDirection: "row",
+    alignItems: "flex-start",
+    gap: Spacing.sm,
+    padding: Spacing.md,
+    borderRadius: Radius.lg,
+    backgroundColor: Colors.errorContainer,
+    marginTop: Spacing.md,
+  },
+  modalInlineValidationText: {
+    flex: 1,
+    fontSize: FontSize.bodySm,
+    lineHeight: 18,
+    fontWeight: FontWeight.semiBold,
+    color: Colors.error,
+  },
   modalActions: {
     flexDirection: "row",
     gap: Spacing.md,
@@ -1247,9 +1320,17 @@ const styles = StyleSheet.create({
     justifyContent: "center",
     ...Shadows.fab,
   },
+  modalConfirmBtnDisabled: {
+    backgroundColor: Colors.surfaceContainerHighest,
+    shadowOpacity: 0,
+  },
   modalConfirmText: {
     fontSize: FontSize.bodyMd,
     fontWeight: FontWeight.bold,
     color: Colors.onPrimary,
+  },
+  modalConfirmTextDisabled: {
+    color: Colors.onSurfaceVariant,
+    opacity: 0.45,
   },
 });

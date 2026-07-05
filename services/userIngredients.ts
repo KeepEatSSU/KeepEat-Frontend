@@ -27,14 +27,19 @@ import type {
   IngredientDraft,
   StorageType,
 } from "@/constants/domain";
+import type { ApiStorageType } from "@/constants/ingredients-master";
 import {
   getMasterSnapshot,
   type ResolvedSnapshot,
 } from "@/services/ingredientMaster";
+import {
+  mapStorageTypeFromApi,
+  mapStorageTypeToApi,
+} from "@/utils/ingredientEntryRules";
+
+export { mapStorageTypeFromApi, mapStorageTypeToApi };
 
 // ─── Backend DTOs (kept private to this module) ──────────────────────────────
-
-type ApiStorageType = "실온" | "냉장" | "냉동";
 
 interface UserIngredientResponse {
   id: number;
@@ -74,28 +79,6 @@ export interface UserIngredientRequest {
   expiryDate?: string;
   purchaseDate?: string;
   customName?: string;
-}
-
-// ─── Storage-type mapping ────────────────────────────────────────────────────
-
-const STORAGE_API_TO_DOMAIN: Record<ApiStorageType, StorageType> = {
-  실온: "room",
-  냉장: "fridge",
-  냉동: "frozen",
-};
-
-const STORAGE_DOMAIN_TO_API: Record<StorageType, ApiStorageType> = {
-  room: "실온",
-  fridge: "냉장",
-  frozen: "냉동",
-};
-
-export function mapStorageTypeFromApi(api: ApiStorageType): StorageType {
-  return STORAGE_API_TO_DOMAIN[api];
-}
-
-export function mapStorageTypeToApi(domain: StorageType): ApiStorageType {
-  return STORAGE_DOMAIN_TO_API[domain];
 }
 
 // ─── Date helpers ────────────────────────────────────────────────────────────

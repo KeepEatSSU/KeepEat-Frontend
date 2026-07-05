@@ -15,15 +15,17 @@ import {
   Spacing,
 } from "@/constants/theme";
 import type { IngredientDraft } from "@/constants/domain";
-import { METRIC_TO_DAYS } from "@/constants/ingredients-master";
 import { useIngredientMaster } from "@/context/IngredientMasterContext";
 import {
   createIngredients,
   mapIngredientToCreateRequest,
-  mapStorageTypeFromApi,
 } from "@/services/userIngredients";
 import { getErrorMessage } from "@/services/api";
 import { ocrPending, mapOcrCandidateToDraft } from "@/services/ocr";
+import {
+  getFirstIngredientDraftValidationError,
+  resolveInitialStorageAndExpiry,
+} from "@/utils/ingredientEntryRules";
 import { CommonActions } from "@react-navigation/native";
 import { useNavigation, useLocalSearchParams } from "expo-router";
 import { useEffect, useState } from "react";
@@ -47,7 +49,7 @@ function createEmptyDraft(): IngredientDraft {
     id: String(Date.now()),
     name: "",
     nickname: "",
-    quantity: 1,
+    quantity: null,
     unit: "개",
     storage: null,
     expirationDate: expiry,
@@ -121,11 +123,7 @@ export default function AddConfirmScreen() {
   };
 
   const hasAnyError = items.some(
-    (it) =>
-      it.name.trim() === "" ||
-      it.quantity === null ||
-      it.quantity < 1 ||
-      it.storage == null,
+    (it) => getFirstIngredientDraftValidationError(it, snapshot) !== null,
   );
 
   const resetToHome = () => {
@@ -196,15 +194,10 @@ export default function AddConfirmScreen() {
     if (!editingItemId) return;
     setValidationError("");
 
-    // Inspect the picked master's storage options to decide whether storage
-    // can be auto-selected. Unambiguous masters (즉석밥 → 실온만) auto-fill;
-    // ambiguous ones (삼겹살 → 냉장/냉동) leave it null so the user picks
-    // deliberately. When auto-filling, also seed the expiry from the master's
-    // (min+max)/2 days for that storage.
-    const options =
-      snapshot?.optionsByIngredientId.get(entry.id) ?? [];
-    const uniqueDomains = Array.from(
-      new Set(options.map((o) => mapStorageTypeFromApi(o.storageType))),
+    const options = snapshot?.optionsByIngredientId.get(entry.id) ?? [];
+    const initial = resolveInitialStorageAndExpiry(
+      options,
+      purchaseDate,
     );
 
     // Picking a new master is treated as a fresh context — reset the
@@ -214,25 +207,11 @@ export default function AddConfirmScreen() {
       name: entry.name,
       ingredientId: entry.id,
       expirationManuallySet: false,
+      storage: initial.storage,
     };
 
-    if (uniqueDomains.length === 1) {
-      const storage = uniqueDomains[0];
-      patch.storage = storage;
-      const opt = options.find(
-        (o) => mapStorageTypeFromApi(o.storageType) === storage,
-      );
-      if (opt) {
-        const avgDays = Math.max(
-          1,
-          Math.round(((opt.min + opt.max) / 2) * METRIC_TO_DAYS[opt.metric]),
-        );
-        const expiry = new Date(purchaseDate);
-        expiry.setDate(expiry.getDate() + avgDays);
-        patch.expirationDate = expiry;
-      }
-    } else {
-      patch.storage = null;
+    if (initial.expirationDate) {
+      patch.expirationDate = initial.expirationDate;
     }
 
     updateItem(editingItemId, patch);

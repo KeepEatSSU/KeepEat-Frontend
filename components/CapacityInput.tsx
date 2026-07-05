@@ -106,7 +106,9 @@ export function CapacityInput({
 
         <View style={styles.center}>
           <TextInput
-            value={editing ? draft : value != null ? String(value) : "?"}
+            value={editing ? draft : value != null ? String(value) : ""}
+            placeholder="입력"
+            placeholderTextColor={hasError ? Colors.error : Colors.outline}
             onFocus={() => {
               setEditing(true);
               setDraft(value != null ? String(value) : "");
@@ -117,8 +119,16 @@ export function CapacityInput({
             keyboardType="numeric"
             returnKeyType="done"
             selectTextOnFocus
-            accessibilityLabel={`현재 수량 ${value ?? 0} ${unit}`}
-            style={[styles.valueText, hasError && { color: Colors.error }]}
+            accessibilityLabel={
+              value == null
+                ? `현재 수량 미입력, 단위 ${unit}`
+                : `현재 수량 ${value} ${unit}`
+            }
+            style={[
+              styles.valueText,
+              value == null && styles.valuePlaceholder,
+              hasError && { color: Colors.error },
+            ]}
           />
           <Pressable
             onPress={onUnitPress}
@@ -242,6 +252,11 @@ const styles = StyleSheet.create({
     minWidth: 40,
     padding: 0,
     margin: 0,
+  },
+  valuePlaceholder: {
+    fontSize: FontSize.bodyLg,
+    fontWeight: FontWeight.semiBold,
+    color: Colors.outline,
   },
   unitChip: {
     flexDirection: "row",

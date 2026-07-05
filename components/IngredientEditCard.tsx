@@ -26,20 +26,15 @@ import {
   type IngredientDraft,
   type StorageType,
 } from "@/constants/domain";
-import {
-  METRIC_TO_DAYS,
-  type ApiStorageType,
-  type StorageOptionEntry,
-} from "@/constants/ingredients-master";
+import type { StorageOptionEntry } from "@/constants/ingredients-master";
 import { useIngredientMaster } from "@/context/IngredientMasterContext";
-
-// ─── Helpers ──────────────────────────────────────────────────────────────────
-
-const STORAGE_DOMAIN_TO_API: Record<StorageType, ApiStorageType> = {
-  room: "실온",
-  fridge: "냉장",
-  frozen: "냉동",
-};
+import {
+  findStorageOptionForStorage,
+  getAutoExpiryForStorageChange,
+  getDraftStorageOptions,
+  getIngredientDraftFieldErrors,
+  isStorageSelectable,
+} from "@/utils/ingredientEntryRules";
 
 // ─── Props ────────────────────────────────────────────────────────────────────
 
@@ -65,24 +60,25 @@ export function IngredientEditCard({
   hideDelete = false,
 }: IngredientEditCardProps) {
   const { snapshot } = useIngredientMaster();
-  const hasError = item.quantity === null || item.quantity <= 0;
+  const fieldErrors = useMemo(
+    () => getIngredientDraftFieldErrors(item, snapshot),
+    [item, snapshot],
+  );
+  const nameErrorText = fieldErrors.name ?? "";
+  const quantityErrorText = fieldErrors.quantity ?? "";
+  const storageErrorText = fieldErrors.storage ?? "";
+  const expiryErrorText = fieldErrors.expirationDate ?? "";
+  const hasError = quantityErrorText !== "";
   const [infoOpen, setInfoOpen] = useState(false);
-  // OCR can return UNMATCHED items (rawName filled, no master link). The
-  // empty-name placeholder already covers the never-picked case; this flag
-  // covers the "name is filled but the picker step still needs to happen".
-  const needsMatching = item.name !== "" && item.ingredientId == null;
-  // Unified "needs user action" signals — same visual language as the
-  // quantity field. Name box turns red for both empty and UNMATCHED, and
-  // the card-level tint fires for any unresolved input.
-  const nameNeedsAction =
-    !item.isCustom && (item.name === "" || needsMatching);
-  const cardNeedsAction = hasError || nameNeedsAction;
+  const nameNeedsAction = nameErrorText !== "";
+  const storageNeedsAction = storageErrorText !== "";
+  const cardNeedsAction =
+    hasError || nameNeedsAction || storageNeedsAction || expiryErrorText !== "";
 
   // Master storage options for the currently picked ingredient (if any).
   const masterOptions = useMemo<StorageOptionEntry[] | undefined>(() => {
-    if (item.ingredientId == null) return undefined;
-    return snapshot?.optionsByIngredientId.get(item.ingredientId);
-  }, [item.ingredientId, snapshot]);
+    return getDraftStorageOptions(item, snapshot);
+  }, [item, snapshot]);
 
   // Whether the quick-expiry chips will actually render. Mirrors
   // QuickExpiryPicker's internal `match` check so we can decide whether to
@@ -91,44 +87,22 @@ export function IngredientEditCard({
     const { isCustom, ingredientId, storage } = item;
     if (isCustom) return false;
     if (ingredientId == null || storage == null) return false;
-    const opts = snapshot?.optionsByIngredientId.get(ingredientId);
-    if (!opts) return false;
-    const apiStorage = STORAGE_DOMAIN_TO_API[storage];
-    return opts.some((o) => o.storageType === apiStorage);
-  }, [item.isCustom, item.ingredientId, item.storage, snapshot]);
+    return findStorageOptionForStorage(masterOptions, storage) !== undefined;
+  }, [item, masterOptions]);
 
   const storageHasOption = (storage: StorageType): boolean => {
-    if (!masterOptions) return true; // unknown master → don't restrict
-    return masterOptions.some(
-      (o) => o.storageType === STORAGE_DOMAIN_TO_API[storage],
-    );
+    return isStorageSelectable(masterOptions, storage);
   };
 
   const handleStorageChange = (newStorage: StorageType) => {
     if (newStorage === item.storage) return;
 
-    // Master-avg auto-expiry for the new storage. Skipped when the user
-    // already edited the date by hand (preserve their intent) or no master
-    // option is available. Frozen is treated like any other storage now —
-    // it has its own (min, max) window in the master data.
-    const autoExpiry = (() => {
-      if (item.expirationManuallySet) return undefined;
-      if (item.ingredientId == null) return undefined;
-      const options = snapshot?.optionsByIngredientId.get(item.ingredientId);
-      if (!options) return undefined;
-      const opt = options.find(
-        (o) => o.storageType === STORAGE_DOMAIN_TO_API[newStorage],
-      );
-      if (!opt) return undefined;
-      const avgDays = Math.max(
-        1,
-        Math.round(((opt.min + opt.max) / 2) * METRIC_TO_DAYS[opt.metric]),
-      );
-      const anchor = purchaseDate ?? new Date();
-      const d = new Date(anchor);
-      d.setDate(d.getDate() + avgDays);
-      return d;
-    })();
+    const autoExpiry = getAutoExpiryForStorageChange({
+      options: masterOptions,
+      storage: newStorage,
+      purchaseDate: purchaseDate ?? new Date(),
+      expirationManuallySet: item.expirationManuallySet,
+    });
 
     onUpdate({
       storage: newStorage,
@@ -244,7 +218,10 @@ export function IngredientEditCard({
             onChangeText={(v) => onUpdate({ name: v })}
             placeholder="재료 이름 입력"
             placeholderTextColor={Colors.outline}
-            style={styles.customNameInput}
+            style={[
+              styles.customNameInput,
+              nameNeedsAction && styles.customNameInputNeedsAction,
+            ]}
           />
         ) : (
           <Pressable
@@ -286,7 +263,7 @@ export function IngredientEditCard({
       {nameNeedsAction && (
         <View style={styles.errorRow}>
           <Ionicons name="information-circle" size={14} color={Colors.error} />
-          <Text style={styles.errorText}>식재료를 선택해주세요</Text>
+          <Text style={styles.errorText}>{nameErrorText}</Text>
         </View>
       )}
 
@@ -315,39 +292,82 @@ export function IngredientEditCard({
       {hasError && (
         <View style={styles.errorRow}>
           <Ionicons name="information-circle" size={14} color={Colors.error} />
-          <Text style={styles.errorText}>수량을 확인해주세요</Text>
+          <Text style={styles.errorText}>{quantityErrorText}</Text>
         </View>
       )}
 
       {/* Storage chips */}
-      <View style={styles.storageRow}>
-        {STORAGE_OPTIONS.map(({ key, label }) => {
-          const isActive = item.storage === key;
-          const supported = storageHasOption(key);
-          return (
-            <Pressable
-              key={key}
-              onPress={() => supported && handleStorageChange(key)}
-              disabled={!supported}
-              style={[
-                styles.storageChip,
-                isActive && styles.storageChipActive,
-                !supported && styles.storageChipDisabled,
-              ]}
-            >
-              <Text
+      <View style={styles.storageGroup}>
+        <View style={styles.storageLabelRow}>
+          <Text
+            style={[
+              styles.storageLabel,
+              storageNeedsAction && styles.storageLabelError,
+            ]}
+          >
+            보관 방법
+          </Text>
+          <Text
+            style={[
+              styles.storageRequiredText,
+              storageNeedsAction && styles.storageRequiredTextError,
+            ]}
+          >
+            필수
+          </Text>
+        </View>
+        <View style={styles.storageRow}>
+          {STORAGE_OPTIONS.map(({ key, label }) => {
+            const isActive = item.storage === key;
+            const supported = storageHasOption(key);
+            let accessibilityHint: string | undefined;
+            if (!supported) {
+              accessibilityHint =
+                "선택한 식재료에서 지원하지 않는 보관 방법입니다";
+            } else if (storageNeedsAction) {
+              accessibilityHint = "필수 입력입니다";
+            }
+            return (
+              <Pressable
+                key={key}
+                accessibilityRole="button"
+                accessibilityLabel={`${label} 보관 방법`}
+                accessibilityHint={accessibilityHint}
+                accessibilityState={{
+                  selected: isActive,
+                  disabled: !supported,
+                }}
+                onPress={() => supported && handleStorageChange(key)}
+                disabled={!supported}
                 style={[
-                  styles.storageChipText,
-                  isActive && styles.storageChipTextActive,
-                  !supported && styles.storageChipTextDisabled,
+                  styles.storageChip,
+                  storageNeedsAction && styles.storageChipNeedsAction,
+                  isActive && styles.storageChipActive,
+                  !supported && styles.storageChipDisabled,
                 ]}
               >
-                {label}
-              </Text>
-            </Pressable>
-          );
-        })}
+                <Text
+                  style={[
+                    styles.storageChipText,
+                    storageNeedsAction && styles.storageChipTextNeedsAction,
+                    isActive && styles.storageChipTextActive,
+                    !supported && styles.storageChipTextDisabled,
+                  ]}
+                >
+                  {label}
+                </Text>
+              </Pressable>
+            );
+          })}
+        </View>
       </View>
+
+      {storageNeedsAction && (
+        <View style={styles.errorRow}>
+          <Ionicons name="information-circle" size={14} color={Colors.error} />
+          <Text style={styles.errorText}>{storageErrorText}</Text>
+        </View>
+      )}
 
       {/* Expiry group: chips + date picker wrapped in a single labeled
           container so the connection between them reads visually. When the
@@ -361,7 +381,9 @@ export function IngredientEditCard({
             storage={item.storage}
             purchaseDate={purchaseDate ?? new Date()}
             expirationDate={item.expirationDate}
-            onPick={(d) => onUpdate({ expirationDate: d })}
+            onPick={(d) =>
+              onUpdate({ expirationDate: d, expirationManuallySet: true })
+            }
             showLabel={false}
             inGroup
           />
@@ -382,6 +404,12 @@ export function IngredientEditCard({
           }
           suffix="까지"
         />
+      )}
+      {expiryErrorText !== "" && (
+        <View style={styles.errorRow}>
+          <Ionicons name="information-circle" size={14} color={Colors.error} />
+          <Text style={styles.errorText}>{expiryErrorText}</Text>
+        </View>
       )}
     </View>
     <InfoModal
@@ -508,6 +536,10 @@ const styles = StyleSheet.create({
     color: Colors.onSurface,
     textAlign: "center",
   },
+  customNameInputNeedsAction: {
+    backgroundColor: "rgba(255, 218, 214, 0.20)",
+    color: Colors.error,
+  },
   errorRow: {
     flexDirection: "row",
     alignItems: "center",
@@ -519,6 +551,33 @@ const styles = StyleSheet.create({
     fontSize: FontSize.labelSm,
     fontWeight: FontWeight.medium,
     color: Colors.error,
+  },
+  storageGroup: {
+    gap: Spacing.sm,
+  },
+  storageLabelRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+  },
+  storageLabel: {
+    fontSize: FontSize.labelSm,
+    fontWeight: FontWeight.bold,
+    color: Colors.primary,
+    letterSpacing: LetterSpacing.wide,
+  },
+  storageLabelError: {
+    color: Colors.error,
+  },
+  storageRequiredText: {
+    fontSize: FontSize.labelSm,
+    fontWeight: FontWeight.bold,
+    color: Colors.onSurfaceVariant,
+    opacity: 0.55,
+  },
+  storageRequiredTextError: {
+    color: Colors.error,
+    opacity: 1,
   },
   storageRow: {
     flexDirection: "row",
@@ -532,6 +591,9 @@ const styles = StyleSheet.create({
     justifyContent: "center",
     backgroundColor: Colors.surfaceContainerHigh,
   },
+  storageChipNeedsAction: {
+    backgroundColor: "rgba(255, 218, 214, 0.20)",
+  },
   storageChipActive: {
     backgroundColor: Colors.primary,
   },
@@ -544,6 +606,10 @@ const styles = StyleSheet.create({
     fontWeight: FontWeight.bold,
     color: Colors.onSurfaceVariant,
     opacity: 0.5,
+  },
+  storageChipTextNeedsAction: {
+    color: Colors.error,
+    opacity: 0.85,
   },
   storageChipTextActive: {
     color: Colors.onPrimary,

@@ -23,8 +23,14 @@ import * as ImageManipulator from "expo-image-manipulator";
 import { api } from "@/services/api";
 import { tokenStorage } from "@/services/tokenStorage";
 import { API_BASE_URL } from "@/constants/config";
-import { UNITS, type IngredientDraft, type StorageType, type Unit } from "@/constants/domain";
+import { UNITS, type IngredientDraft, type Unit } from "@/constants/domain";
 import type { ApiStorageType } from "@/types/ingredientMaster";
+import {
+  addDays,
+  normalizeOcrStorageOption,
+  resolveInitialStorageAndExpiry,
+  startOfDay,
+} from "@/utils/ingredientEntryRules";
 
 // ─── Backend DTOs ────────────────────────────────────────────────────────────
 
@@ -37,7 +43,7 @@ interface OcrStorageOption {
 export interface OcrIngredientCandidate {
   rawName: string;
   customName: string;
-  quantity: number;
+  quantity: number | null;
   unit: string;
   matchStatus: "MATCHED" | "UNMATCHED";
   /** Null when matchStatus === "UNMATCHED" — backend couldn't link to master. */
@@ -52,44 +58,6 @@ interface OcrParseResponse {
 
 // ─── Mapping ─────────────────────────────────────────────────────────────────
 
-const API_TO_DOMAIN_STORAGE: Record<ApiStorageType, StorageType> = {
-  실온: "room",
-  냉장: "fridge",
-  냉동: "frozen",
-};
-
-/**
- * Resolve storage + expiry from the backend's per-candidate options.
- * - Single unique domain storage  → auto-select that one + compute expiry
- *   from its (min+max)/2 days.
- * - Multiple or zero options      → return null storage/expiry so the user
- *   is forced to pick deliberately on the add-confirm screen.
- */
-function resolveStorageAndExpiry(
-  options: OcrStorageOption[],
-): { storage: StorageType | null; expirationDate: Date | null } {
-  const uniqueDomains = Array.from(
-    new Set(options.map((o) => API_TO_DOMAIN_STORAGE[o.storageType])),
-  );
-  if (uniqueDomains.length !== 1) {
-    return { storage: null, expirationDate: null };
-  }
-  const storage = uniqueDomains[0];
-  const opt = options.find(
-    (o) => API_TO_DOMAIN_STORAGE[o.storageType] === storage,
-  );
-  if (!opt) return { storage, expirationDate: null };
-  const avgDays = Math.max(1, Math.round((opt.minDays + opt.maxDays) / 2));
-  return { storage, expirationDate: startOfDayPlus(avgDays) };
-}
-
-function startOfDayPlus(days: number): Date {
-  const d = new Date();
-  d.setHours(0, 0, 0, 0);
-  d.setDate(d.getDate() + days);
-  return d;
-}
-
 export function mapOcrCandidateToDraft(
   candidate: OcrIngredientCandidate,
 ): IngredientDraft {
@@ -103,6 +71,7 @@ export function mapOcrCandidateToDraft(
   const localId = `ocr-${seed}-${Date.now()}-${Math.random()
     .toString(36)
     .slice(2, 6)}`;
+  const today = startOfDay(new Date());
 
   // UNMATCHED branch: backend couldn't link this scan to a master entry.
   // Surface the raw text in `name` so the user sees what was detected, leave
@@ -122,13 +91,14 @@ export function mapOcrCandidateToDraft(
       // 누락되는 경로 — 기본 7일 폴백으로 미리 채워 UI에도 즉시 표시.
       // 사용자는 그 값을 보고 필요시 직접 수정 가능.
       storage: null,
-      expirationDate: startOfDayPlus(7),
+      expirationDate: addDays(today, 7),
     };
   }
 
   // MATCHED branch — auto-select storage only when unambiguous.
-  const { storage, expirationDate } = resolveStorageAndExpiry(
-    candidate.storageOptions,
+  const { storage, expirationDate } = resolveInitialStorageAndExpiry(
+    candidate.storageOptions.map(normalizeOcrStorageOption),
+    today,
   );
   return {
     id: localId,
