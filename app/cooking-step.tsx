@@ -198,7 +198,15 @@ export default function CookingStepScreen() {
     };
   }, [id, recipeId]);
 
-  const steps = recipe?.instructions ?? [];
+  const steps = useMemo(
+    () =>
+      Array.isArray(recipe?.instructions)
+        ? recipe.instructions.filter(
+            (step) => typeof step === "string" && step.trim().length > 0,
+          )
+        : [],
+    [recipe?.instructions],
+  );
   const currentStep = steps[stepIndex] ?? "";
   const totalSteps = steps.length;
   const isFirst = stepIndex === 0;
@@ -253,13 +261,24 @@ export default function CookingStepScreen() {
     );
   }
 
-  if (isLoading || !recipe || totalSteps === 0) {
+  if (isLoading || !recipe) {
     return (
       <View
         style={[styles.screen, styles.centered, { paddingTop: insets.top }]}
       >
         <ActivityIndicator size="large" color={Colors.primary} />
       </View>
+    );
+  }
+
+  if (totalSteps === 0) {
+    return (
+      <ErrorScreen
+        message="조리 단계를 불러오지 못했어요"
+        subMessage="레시피 상세에서 조리 순서를 다시 확인해 주세요."
+        buttonLabel="이전으로 돌아가기"
+        onPressHome={() => router.back()}
+      />
     );
   }
 

@@ -1,4 +1,4 @@
-import { useState, useMemo, useRef, useCallback, useEffect } from "react";
+import { useState, useRef, useCallback, useEffect } from "react";
 import {
   View,
   Text,
@@ -298,11 +298,15 @@ export default function RecipeDetailScreen() {
 
   useEffect(() => {
     const fetchRecipeDetail = async () => {
-      if (!id) return;
       setIsLoading(true);
       setIsError(false);
       try {
         const recipeId = Number(id);
+        if (!id || Number.isNaN(recipeId)) {
+          setIsError(true);
+          setLoadError(null);
+          return;
+        }
         // Fetch detail + owned-match in parallel. The owned-match endpoint
         // is the authoritative source for the 보유 X/Y count; if it fails
         // we silently fall back to the DTO's per-ingredient `isOwned`.
@@ -333,14 +337,6 @@ export default function RecipeDetailScreen() {
         };
         setRecipe(mappedRecipe);
       } catch (error) {
-        // toast는 폴백 카피, ErrorScreen에 동일 메시지를 헬퍼로 한 번 더 노출.
-        showTopToast({
-          message: getErrorMessage(
-            error,
-            "레시피 정보를 불러오지 못했어요.",
-          ),
-          variant: "error",
-        });
         setIsError(true);
         setLoadError(error);
       } finally {
@@ -349,7 +345,7 @@ export default function RecipeDetailScreen() {
     };
 
     fetchRecipeDetail();
-  }, [id, showTopToast]);
+  }, [id]);
 
   const [portions, setPortions] = useState(1);
   // True while the "내 레시피에 추가" PATCH is in-flight — gates the button
