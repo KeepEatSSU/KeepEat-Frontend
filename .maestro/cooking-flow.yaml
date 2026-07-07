@@ -1,0 +1,37 @@
+appId: com.anonymous.keepeatfront
+env:
+  TEST_RECIPE_TITLE: ${TEST_RECIPE_TITLE}
+---
+- launchApp
+- tapOn:
+    text: "레시피"
+    optional: true
+- tapOn:
+    text: ${TEST_RECIPE_TITLE}
+- assertVisible:
+    text: "요리 시작하기"
+- tapOn:
+    text: "요리 시작하기"
+- assertVisible:
+    text: "요리 시작"
+    optional: true
+- tapOn:
+    text: "요리 시작"
+    optional: true
+- assertVisible:
+    text: "01"
+    optional: true
+- assertVisible:
+    text: "다음 단계"
+- tapOn:
+    text: "다음 단계"
+- assertVisible:
+    text: "02"
+    optional: true
+- tapOn:
+    text: "이전"
+    optional: true
+- assertVisible:
+    text: "01"
+    optional: true
+# 조리 완료는 사용자 기록/식재료 데이터를 변경할 수 있으므로 실행하지 않는다.
