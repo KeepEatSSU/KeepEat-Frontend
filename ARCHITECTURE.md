@@ -95,6 +95,8 @@ Redux, Zustand, React Query 같은 외부 상태 관리 도구는 현재 사용�
 공용 설정:
 
 - `constants/config.ts`: `API_BASE_URL`, `API_TIMEOUT_MS`, 인증 엔드포인트, `DEV_BYPASS_AUTH`.
+- `app.config.ts`: `APP_ENV=local|demo|prod`에 따라 demo/production 앱 식별자, scheme, EAS Update runtime을 구성한다.
+- 환경별 실행 명령과 API/OAuth/EAS 매핑은 `docs/frontend/environment-configuration.md`를 따른다.
 - `services/tokenStorage.ts`: access/refresh token을 `expo-secure-store`에 저장.
 - `services/api.ts`: axios 인스턴스, Bearer 토큰 자동 첨부, 401 refresh/retry, 로그아웃 이벤트, 인증 helper.
 
@@ -128,7 +130,6 @@ Redux, Zustand, React Query 같은 외부 상태 관리 도구는 현재 사용�
 ## 확인 필요
 
 - 백엔드 API의 최신 Swagger/OpenAPI 문서 위치.
-- 배포 환경별 API base URL 관리 방식.
 - 자동 테스트 도구 도입 여부.
 - 현재 `services/ingredientMaster.ts` 주석의 Stage 1/Stage 2 전환이 완료됐는지 여부. 일부 화면은 `IngredientMasterContext`를 사용하지만 주석은 전환 중이라고 설명한다.
 - 푸시 알림 `targetId` 기반 상세 이동 정책.

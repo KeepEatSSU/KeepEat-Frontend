@@ -49,6 +49,58 @@
 | 저장소 | AsyncStorage, Expo SecureStore |
 | 검증 | npm verify, Maestro |
 
+## 앱 Variant와 API 환경
+
+production 앱은 기존 식별자(`KeepEat`, `keepeat`, `com.anonymous.keepeatfront`,
+`com.anonymous.keepeat_front`)를 유지합니다. development/demo 빌드는 demo
+variant로 생성되며 이름과 scheme, iOS/Android 식별자에 `Demo` 또는 `.demo`가
+붙습니다. 두 variant는 서로 다른 앱 샌드박스를 사용하므로 SecureStore 데이터도
+분리됩니다.
+
+로컬 Metro 실행은 `.env`의 실행 환경별 API URL을 사용합니다. 선택된 값은 앱이
+읽는 `EXPO_PUBLIC_API_URL`로 주입됩니다. `.env`는 Git에서 무시됩니다.
+
+```dotenv
+# .env
+EXPO_PUBLIC_API_URL_LOCAL=http://localhost:8080
+EXPO_PUBLIC_API_URL_DEMO=<demo-api-url>
+```
+
+```bash
+npm run start:local # EXPO_PUBLIC_API_URL_LOCAL 사용
+npm run start:demo  # EXPO_PUBLIC_API_URL_DEMO 사용
+```
+
+EAS 클라우드 빌드는 Git에서 제외된 로컬 env 파일을 읽지 않습니다. EAS의 내장
+`preview` Environment에는 demo API 주소를, `production` Environment에는
+production API 주소를 같은 이름의 `EXPO_PUBLIC_API_URL`로 등록합니다. 여기서
+`preview`는 EAS 원격 변수 저장소 이름일 뿐, Build profile과 Update channel은
+`demo`입니다. EAS Update에서도 app config가 같은 환경을 해석하도록
+`APP_ENV=demo` 또는 `APP_ENV=prod`를 함께 등록합니다.
+
+```bash
+eas env:create --name EXPO_PUBLIC_API_URL --value <demo-api-url> --environment preview --visibility plaintext
+eas env:create --name APP_ENV --value demo --environment preview --visibility plaintext
+eas env:create --name EXPO_PUBLIC_API_URL --value <production-api-url> --environment production --visibility plaintext
+eas env:create --name APP_ENV --value prod --environment production --visibility plaintext
+```
+
+Build와 Update는 profile/channel에 대응하는 Environment를 함께 사용합니다.
+
+```bash
+eas build --profile development
+eas build --profile demo
+eas build --profile production
+
+eas update --channel demo --environment preview
+eas update --channel production --environment production
+```
+
+Android demo 빌드는 `.demo` package로 등록한 별도 Firebase 설정 파일이 필요합니다.
+EAS `preview` Environment에 파일 변수 `GOOGLE_SERVICES_JSON`을 등록하면 동적 app
+config가 해당 파일을 사용합니다. EAS Update는 demo/production channel과
+variant별 runtimeVersion으로 분리합니다.
+
 ## 프론트엔드 구현 범위
 
 | 영역 | 내용 |

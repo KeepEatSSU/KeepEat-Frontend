@@ -4,7 +4,21 @@
  * we never grep for hardcoded URLs again.
  */
 
-export const API_BASE_URL = "http://43.202.180.175.nip.io:8080";
+const configuredApiUrl = process.env.EXPO_PUBLIC_API_URL?.trim();
+
+if (!configuredApiUrl) {
+  throw new Error(
+    "[KeepEat config] EXPO_PUBLIC_API_URL is required. Use npm run start:local/start:demo or configure the EAS environment.",
+  );
+}
+
+if (!/^https?:\/\//i.test(configuredApiUrl)) {
+  throw new Error(
+    "[KeepEat config] EXPO_PUBLIC_API_URL must start with http:// or https://.",
+  );
+}
+
+export const API_BASE_URL = configuredApiUrl.replace(/\/+$/, "");
 
 // Auth endpoints — used by the API client and token-refresh flow.
 export const AUTH_ENDPOINTS = {

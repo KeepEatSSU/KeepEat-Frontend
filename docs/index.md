@@ -33,6 +33,7 @@
 | `frontend/navigation.md` | Expo Router 구조, route params, 이동 규칙 | 화면 추가/이동/딥링크 작업 |
 | `frontend/state-management.md` | Context, 로컬 상태, 저장소 사용 위치 | 상태 흐름 변경 작업 |
 | `frontend/api-contracts.md` | 서비스 모듈과 현재 코드상 API 계약 | API 연동/DTO 변경 작업 |
+| `frontend/environment-configuration.md` | local/demo/prod 실행, API URL, OAuth callback, EAS 설정 | 환경변수, 앱 variant, 빌드/배포 설정 작업 |
 | `frontend/design-system.md` | 디자인 토큰과 현재 UI 규칙 위치 | UI 구현/리디자인 작업 |
 
 ## Decisions

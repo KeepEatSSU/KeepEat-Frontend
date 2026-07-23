@@ -6,13 +6,28 @@
   "build": {
     "development": {
       "developmentClient": true,
-      "distribution": "internal"
+      "distribution": "internal",
+      "channel": "demo",
+      "environment": "preview",
+      "env": {
+        "APP_ENV": "demo"
+      }
     },
-    "preview": {
-      "distribution": "internal"
+    "demo": {
+      "distribution": "internal",
+      "channel": "demo",
+      "environment": "preview",
+      "env": {
+        "APP_ENV": "demo"
+      }
     },
     "production": {
-      "autoIncrement": true
+      "autoIncrement": true,
+      "channel": "production",
+      "environment": "production",
+      "env": {
+        "APP_ENV": "prod"
+      }
     }
   },
   "submit": {

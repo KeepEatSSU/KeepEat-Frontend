@@ -78,7 +78,9 @@
 `services/googleAuth.ts`:
 
 - 백엔드 OAuth URL: `${API_BASE_URL}/oauth2/authorization/google`
-- redirect URL: `keepeat://oauth2/redirect`
+- redirect URL은 현재 app variant의 Expo scheme으로 생성한다.
+  - demo: `keepeat-demo://oauth2/redirect`
+  - production: `keepeat://oauth2/redirect`
 - `WebBrowser.openAuthSessionAsync()` 결과 URL에서 `accessToken`, `refreshToken` query param을 파싱한다.
 
 보안상 토큰 또는 redirect 전체 URL은 로그로 남기지 말라는 주석이 있다.
@@ -103,6 +105,5 @@
 
 - 백엔드가 요구하는 정확한 비밀번호 정책. 현재 클라이언트 regex와 일치하는지 확인 필요.
 - 이메일 인증번호 만료 시간과 재전송 제한 정책.
-- Google OAuth redirect URL의 환경별 설정 방식.
 - `UserInfo.provider` casing 정책. 현재 코드는 `LOCAL`/`google` 혼재를 방어한다.
 - 서버의 알림 설정 API와 현재 마이페이지 OS 권한 중심 UX의 최종 정책.

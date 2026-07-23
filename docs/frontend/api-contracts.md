@@ -7,6 +7,7 @@
 `services/api.ts`:
 
 - base URL: `constants/config.ts`의 `API_BASE_URL`
+- `API_BASE_URL`은 빌드/실행 시 주입된 `EXPO_PUBLIC_API_URL`에서 생성하며, 누락되거나 HTTP(S) URL이 아니면 앱 시작 시 명시적 설정 오류를 낸다.
 - timeout: `API_TIMEOUT_MS`, 현재 15초
 - 기본 header: `Content-Type: application/json`
 - access token 자동 첨부

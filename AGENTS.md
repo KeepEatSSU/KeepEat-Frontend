@@ -26,6 +26,7 @@
    - 라우팅: `docs/frontend/navigation.md`
    - 상태 관리: `docs/frontend/state-management.md`
    - API 계약: `docs/frontend/api-contracts.md`
+   - 앱 환경/EAS/OAuth callback: `docs/frontend/environment-configuration.md`
    - 디자인 시스템: `docs/frontend/design-system.md`
 6. 검증/테스트:
    - 검증 절차: `docs/quality/verification.md`
@@ -43,6 +44,7 @@
 | 레시피 목록, 상세, 내 레시피, 조리 모드 | `docs/product/recipe.md`, `docs/frontend/navigation.md` |
 | AI 추천/스와이프 저장 | `docs/flows/recipe-recommendation.md`, `docs/frontend/state-management.md` |
 | 로그인, 회원가입, 구글 OAuth, 탈퇴 | `docs/product/auth.md`, `docs/frontend/api-contracts.md` |
+| local/demo/prod 환경, API URL, EAS Build/Update | `docs/frontend/environment-configuration.md` |
 | 알림함, 배지, 푸시 탭 라우팅 | `docs/product/notification.md`, `docs/frontend/state-management.md` |
 | UI 토큰/컴포넌트 스타일 | `docs/frontend/design-system.md` |
 | 린트/타입체크/수동 검증 | `docs/quality/verification.md` |
