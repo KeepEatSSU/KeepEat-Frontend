@@ -10,12 +10,11 @@ import {
   Shadows,
   Spacing,
 } from "@/constants/theme";
-import { useNotifications } from "@/context/NotificationContext";
 import { useRecipeRecommendation } from "@/context/RecipeRecommendationContext";
 import { saveRecipes, type GeneratedRecipeDto } from "@/services/recipes";
 import { getErrorMessage } from "@/services/api";
 import { Ionicons } from "@expo/vector-icons";
-import { useFocusEffect, useNavigation, useRouter } from "expo-router";
+import { useNavigation, useRouter } from "expo-router";
 import { useCallback, useEffect, useRef, useState } from "react";
 import {
   ActivityIndicator,
@@ -464,8 +463,6 @@ export default function RecipeSwipeScreen() {
     finishSwiping,
     reset,
   } = useRecipeRecommendation();
-  const { markTypeRead } = useNotifications();
-
   // Buffered save list — pushed during right-swipes, drained as one bulk
   // POST when the deck completes or the user exits. Ref instead of state so
   // navigation listeners can read a fresh value without stale closures.
@@ -494,18 +491,6 @@ export default function RecipeSwipeScreen() {
     }
   }, [showTopToast]);
 
-  // 결과를 실제로 보여줄 때만 RECIPE_READY 읽음 처리 — 빈 안내/로딩만 뜨는
-  // 경우(결과 휘발/콜드스타트 미복원)는 보류해 "결과를 못 봤는데 읽음됨" 모순을
-  // 없앤다. recommendedRecipes.length 의존이라 콜드스타트로 덱이 뒤늦게 복원돼도
-  // (0→N) 그 시점에 한 번 발화한다. markTypeRead는 서버에서 멱등이라 안전.
-  useFocusEffect(
-    useCallback(() => {
-      if (recommendedRecipes.length > 0) {
-        markTypeRead("recipe_ready");
-      }
-    }, [recommendedRecipes.length, markTypeRead]),
-  );
-
   const [currentIndex, setCurrentIndex] = useState(0);
   const [exitModalVisible, setExitModalVisible] = useState(false);
   // 콜드스타트 복원 grace 경과 플래그. 경과 전 빈 덱은 로딩으로 취급(깜빡임 방지),
@@ -517,7 +502,6 @@ export default function RecipeSwipeScreen() {
   }, []);
 
   const isComplete = currentIndex >= recommendedRecipes.length;
-  const remaining = recommendedRecipes.length - currentIndex;
 
   // 화면 상태 결정 (status-aware):
   //  • 덱 있음 → 다 봤으면 completed, 아니면 deck

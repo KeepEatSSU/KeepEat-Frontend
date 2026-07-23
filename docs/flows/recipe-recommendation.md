@@ -55,7 +55,11 @@
 - 앱이 foreground인 경우 인앱 드롭다운으로 `AI 셰프가 레시피를 완성했어요!`를 표시한다.
 - 드롭다운을 누르면 `markSwiping()` 후 `/recipe-swipe`로 이동한다.
 
-원격 push의 `RECIPE_READY`는 `NotificationContext`와 `utils/notificationRouting.ts`에서 `/recipe-swipe`로 연결된다. 다만 결과를 실제로 보여줄 때만 읽음 처리하도록 swipe 화면에서 `markTypeRead("recipe_ready")`를 수행한다.
+원격 Push의 `RECIPE_READY`는 `NotificationContext`와
+`utils/notificationRouting.ts`에서 `/recipe-swipe`로 연결된다. Push 탭에
+유효한 `notificationId`가 있으면 해당 알림 한 건만 읽고, 구형 Push처럼 ID가
+없으면 읽음 처리 없이 route만 수행한다. `/recipe-swipe` 직접 진입이나 결과
+표시 자체는 알림을 읽음 처리하지 않는다.
 
 ## 스와이프 저장
 

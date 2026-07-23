@@ -71,7 +71,13 @@ README 기준:
 알림:
 
 - 알림 목록 refresh/load more.
-- 단건/전체/타입별 읽음.
+- 알림함 열기·닫기·체류만으로 unread가 바뀌지 않는지 확인.
+- 개별 카드, foreground 드롭다운, OS Push 탭이 해당 ID 한 건만 읽는지 확인.
+- 같은 타입의 다른 알림이 unread를 유지하고, 이미 읽은 ID 재탭 시 count가
+  중복 감소하지 않는지 확인.
+- `모두 읽음` 버튼만 전체 읽음을 수행하는지 확인.
+- `notificationId`가 없는 구형 Push가 읽음 처리 없이 타입 route만 수행하는지
+  확인.
 - 단건/일괄 삭제.
 - foreground push 인앱 표시.
 - push 탭 라우팅.

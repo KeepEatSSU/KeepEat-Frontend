@@ -60,7 +60,10 @@ auth route로 확인된 segment:
 - `recipe_ready` -> `/recipe-swipe`
 - `notice` -> route 없음
 
-알림 라우팅은 `NotificationContext`와 `NotificationPopup`에서 같은 결정 함수를 공유한다.
+`NotificationPopup`은 카드의 `notificationId`와 `type`을
+`NotificationContext`의 공통 탭 handler에 전달한다. handler는 유효한 ID 한
+건을 읽은 뒤 위 route를 사용하며, 읽음 API 실패가 화면 이동을 막지는 않는다.
+ID가 없는 구형 Push는 route만 수행한다.
 
 ## 화면 전환 특이점
 
@@ -73,6 +76,6 @@ auth route로 확인된 segment:
 ## TODO / 확인 필요
 
 - 딥링크 URL 정책. `app.json` scheme은 `keepeat`로 설정되어 있다.
-- `targetId`가 있는 알림의 상세 라우팅 정책.
+- 목록 DTO의 `targetId`가 있는 알림을 상세로 연결할지에 대한 정책.
 - `app/(tabs)/add.tsx` placeholder 유지 이유와 향후 처리.
 - auth route 목록에 `change-password`를 포함하지 않는 것이 의도인지 확인.

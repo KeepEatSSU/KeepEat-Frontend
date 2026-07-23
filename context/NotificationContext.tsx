@@ -2,15 +2,11 @@
  * KeepEat — in-app notification state (lifted from AppHeaderRight).
  *
  * Owns the paged list, cursor, loading flag, and read-state mutations so
- * every screen sees one shared source of truth. Behavior is intentionally
- * identical to the previous AppHeaderRight-local implementation — this
- * round is structural only. New features (type-scoped reads, push routing,
- * foreground push handler) land in the next round.
+ * every screen sees one shared source of truth. Notification taps from the
+ * tray and Expo push responses share one per-ID read-and-route handler.
  *
  * Subscribers
  *   - AppHeaderRight (per-tab instances) → bell badge + popup data
- *   - Future: each screen's useFocusEffect → markTypeRead(...)
- *
  * Auth coupling
  *   Initial page fetches once when `isAuthenticated` flips to true. On
  *   logout (false), local state is cleared so the next session doesn't
@@ -33,23 +29,22 @@ import { AppState, type AppStateStatus } from "react-native";
 
 import type {
   AppNotification,
-  NotificationType,
+  NotificationId,
+  NotificationPushData,
 } from "@/constants/domain";
 import { useAuth } from "@/context/AuthContext";
 import { useToast } from "@/components/Toast";
 import {
-  backendNotificationType,
   deleteNotification,
   deleteNotifications,
   fetchNotificationsPage,
   fetchUnreadCount,
   markAllNotificationsRead,
   markNotificationRead,
-  markTypeNotificationsRead,
 } from "@/services/notifications";
 import {
-  resolveNotificationAction,
-  toDomainNotificationType,
+  parseNotificationPushData,
+  routeForNotificationType,
 } from "@/utils/notificationRouting";
 
 // ─── Context ──────────────────────────────────────────────────────────────────
@@ -63,20 +58,12 @@ interface NotificationContextValue {
   refresh: () => Promise<void>;
   /** Append the next page. Used by FlatList onEndReached. */
   loadMore: () => Promise<void>;
-  markRead: (id: number) => Promise<void>;
   markAllRead: () => Promise<void>;
-  /**
-   * Mark every unread notification of a given type as read. Driven by
-   * useFocusEffect in destination screens (home/recipe tab, recipe-swipe).
-   * No-op when there's nothing unread for that type, so the focus-effect
-   * call is safe to fire on every entry. Operates on currently-loaded
-   * `items` only (page-1 scope, method A from diagnosis).
-   */
-  markTypeRead: (type: NotificationType) => Promise<void>;
+  handleNotificationPress: (data: NotificationPushData) => void;
   /** 단일 알림 삭제 — 낙관적 제거 + 실패 시 롤백. */
-  removeNotification: (id: number) => Promise<void>;
+  removeNotification: (id: NotificationId) => Promise<void>;
   /** 일괄 알림 삭제 — 선택된 ids만. 낙관적 제거 + 실패 시 롤백. */
-  removeNotifications: (ids: number[]) => Promise<void>;
+  removeNotifications: (ids: NotificationId[]) => Promise<void>;
   /**
    * 배지(unreadCount)만 가볍게 동기화하는 throttle 내장 진입점. 목록은 안
    * 건드림 — refresh()와 달리 페이지 GET / cursor / loading 토글이 없어 탭
@@ -119,11 +106,15 @@ export function NotificationProvider({
   const [nextCursor, setNextCursor] = useState<number | null>(null);
   const [hasNext, setHasNext] = useState(true);
   const [loading, setLoading] = useState(false);
-  // 배지 숫자의 server-truth. items derived(페이지-1 한정)에서 서버 GET
-  // /unread-count 기반으로 전환. mutation 직후엔 잠깐 stale일 수 있는데
-  // (Phase 2에서 ±N 즉시 보정으로 해결 예정) 다음 refresh / active 복귀 /
-  // 푸시 수신 / modal open 중 가장 빠른 트리거에서 자동 정정된다.
+  // 서버 unread-count를 기준으로 하되 개별/전체 읽음 시 즉시 낙관 반영한다.
   const [unreadCount, setUnreadCount] = useState<number>(0);
+  const itemsRef = useRef<AppNotification[]>([]);
+  const unreadCountRef = useRef(0);
+  const readInFlightRef = useRef<
+    Map<NotificationId, Promise<void>>
+  >(new Map());
+  const markAllInFlightRef = useRef<Promise<void> | null>(null);
+  const stateGenerationRef = useRef(0);
 
   // ref (not state) keeps `refresh` identity stable — open-modal subscribers
   // can include it in useEffect deps without retrigger loops.
@@ -132,6 +123,26 @@ export function NotificationProvider({
   // 경량 unread-count 갱신의 throttle 타임스탬프. AppState 복귀·탭 전환이
   // 공유해 5초 내 연속 트리거를 1회로 흡수.
   const lastUnreadFetchRef = useRef<number>(0);
+
+  const commitItems = useCallback((next: AppNotification[]) => {
+    itemsRef.current = next;
+    setItems(next);
+  }, []);
+
+  const updateItems = useCallback(
+    (updater: (current: AppNotification[]) => AppNotification[]) => {
+      const next = updater(itemsRef.current);
+      commitItems(next);
+      return next;
+    },
+    [commitItems],
+  );
+
+  const commitUnreadCount = useCallback((next: number) => {
+    const normalized = Math.max(0, next);
+    unreadCountRef.current = normalized;
+    setUnreadCount(normalized);
+  }, []);
 
   const refresh = useCallback(async () => {
     if (refreshingRef.current) return;
@@ -146,18 +157,18 @@ export function NotificationProvider({
         fetchUnreadCount(),
       ]);
       if (pageResult.status === "fulfilled") {
-        setItems(pageResult.value.items);
+        commitItems(pageResult.value.items);
         setNextCursor(pageResult.value.nextCursor);
         setHasNext(pageResult.value.hasNext);
       }
       if (countResult.status === "fulfilled") {
-        setUnreadCount(countResult.value);
+        commitUnreadCount(countResult.value);
       }
     } finally {
       setLoading(false);
       refreshingRef.current = false;
     }
-  }, []);
+  }, [commitItems, commitUnreadCount]);
 
   const maybeRefreshUnreadCount = useCallback(() => {
     if (!isAuthenticated) return;
@@ -165,17 +176,17 @@ export function NotificationProvider({
     if (now - lastUnreadFetchRef.current < UNREAD_REFRESH_THROTTLE_MS) return;
     lastUnreadFetchRef.current = now;
     fetchUnreadCount()
-      .then(setUnreadCount)
+      .then(commitUnreadCount)
       // 일시 실패는 무시 — 다음 트리거(탭 전환 / 복귀 / push / modal)에서 정정.
       .catch(() => {});
-  }, [isAuthenticated]);
+  }, [isAuthenticated, commitUnreadCount]);
 
   const loadMore = useCallback(async () => {
     if (loading || !hasNext) return;
     setLoading(true);
     try {
       const page = await fetchNotificationsPage(nextCursor);
-      setItems((prev) => [...prev, ...page.items]);
+      updateItems((current) => [...current, ...page.items]);
       setNextCursor(page.nextCursor);
       setHasNext(page.hasNext);
     } catch {
@@ -184,66 +195,116 @@ export function NotificationProvider({
     } finally {
       setLoading(false);
     }
-  }, [loading, hasNext, nextCursor]);
+  }, [loading, hasNext, nextCursor, updateItems]);
 
-  const markRead = useCallback(async (id: number) => {
-    let snapshot: AppNotification[] = [];
-    setItems((prev) => {
-      snapshot = prev;
-      return prev.map((n) => (n.id === id ? { ...n, isRead: true } : n));
-    });
-    try {
-      await markNotificationRead(id);
-    } catch {
-      setItems(snapshot);
-    }
-  }, []);
+  const markRead = useCallback(
+    async (id: NotificationId) => {
+      const invocationGeneration = stateGenerationRef.current;
+      // 전체 읽음과 단건 읽음의 rollback이 서로를 덮어쓰지 않도록 먼저 시작된
+      // 전체 요청을 정착시킨다. 전체 요청이 실패해도 이어서 이 ID를 단건 처리한다.
+      const markAllInFlight = markAllInFlightRef.current;
+      if (markAllInFlight) await markAllInFlight;
+      if (stateGenerationRef.current !== invocationGeneration) return;
 
-  const markAllRead = useCallback(async () => {
-    let snapshot: AppNotification[] = [];
-    setItems((prev) => {
-      snapshot = prev;
-      return prev.map((n) => ({ ...n, isRead: true }));
-    });
-    try {
-      await markAllNotificationsRead();
-    } catch {
-      setItems(snapshot);
-    }
-  }, []);
+      const inFlight = readInFlightRef.current.get(id);
+      if (inFlight) {
+        // 최초 호출이 자기 rollback을 담당한다. 중복 탭은 같은 raw request를
+        // 기다리되 그 실패를 다시 전파해 unhandled rejection을 만들지 않는다.
+        await inFlight.catch(() => {});
+        return;
+      }
 
-  const markTypeRead = useCallback(async (type: NotificationType) => {
-    // 가드 정책 변경: items에 unread가 없어도 서버 PATCH는 항상 시도.
-    // 이유: 푸시 직후 receivedListener의 refresh 전에 markTypeRead가
-    // 돌면 items가 stale(새 알림 누락)이라, 옛 가드("items unread 0이면
-    // 스킵")가 서버 호출 자체를 막아 서버 isRead가 false로 남던 버그.
-    // PATCH /read-all/{type}은 멱등이라 unread 0이어도 무해.
-    let snapshot: AppNotification[] = [];
-    let hadUnread = false;
-    setItems((prev) => {
-      const unreadOfType = prev.filter((n) => !n.isRead && n.type === type);
-      if (unreadOfType.length === 0) return prev;
-      hadUnread = true;
-      snapshot = prev;
-      const idSet = new Set(unreadOfType.map((n) => n.id));
-      return prev.map((n) => (idSet.has(n.id) ? { ...n, isRead: true } : n));
-    });
-    try {
-      await markTypeNotificationsRead(backendNotificationType(type));
-      // 서버 성공 후 — items 낙관적 flip이 안 됐던 경우(stale 가드 통과)에도
-      // 같은 타입 잔여 unread를 retroactive 동기화. 다음 refresh에 새 알림이
-      // 들어와도 이미 isRead=true. 중복 호출 안전(이미 read면 no-op).
-      if (!hadUnread) {
-        setItems((prev) =>
-          prev.map((n) =>
-            n.type === type && !n.isRead ? { ...n, isRead: true } : n,
+      const target = itemsRef.current.find((item) => item.id === id);
+      if (target?.isRead) return;
+
+      const optimisticallyRead = target !== undefined;
+      const stateGeneration = stateGenerationRef.current;
+      let decrementedUnreadCount = false;
+
+      if (optimisticallyRead) {
+        updateItems((current) =>
+          current.map((item) =>
+            item.id === id ? { ...item, isRead: true } : item,
           ),
         );
+        if (unreadCountRef.current > 0) {
+          commitUnreadCount(unreadCountRef.current - 1);
+          decrementedUnreadCount = true;
+        }
       }
-    } catch {
-      if (hadUnread) setItems(snapshot);
+
+      const request = markNotificationRead(id);
+      readInFlightRef.current.set(id, request);
+      try {
+        await request;
+      } catch {
+        // 로그아웃으로 상태 세대가 바뀌었다면 이전 세션 snapshot을 복원하지 않는다.
+        if (
+          optimisticallyRead &&
+          stateGenerationRef.current === stateGeneration
+        ) {
+          let restored = false;
+          updateItems((current) => {
+            const currentTarget = current.find((item) => item.id === id);
+            if (!currentTarget?.isRead) return current;
+            restored = true;
+            return current.map((item) =>
+              item.id === id ? { ...item, isRead: false } : item,
+            );
+          });
+          if (restored && decrementedUnreadCount) {
+            commitUnreadCount(unreadCountRef.current + 1);
+          }
+        }
+      } finally {
+        if (readInFlightRef.current.get(id) === request) {
+          readInFlightRef.current.delete(id);
+        }
+      }
+    },
+    [commitUnreadCount, updateItems],
+  );
+
+  const markAllRead = useCallback(async () => {
+    const existing = markAllInFlightRef.current;
+    if (existing) {
+      await existing;
+      return;
     }
-  }, []);
+
+    const stateGeneration = stateGenerationRef.current;
+    const operation = (async () => {
+      // 먼저 시작된 단건 요청의 성공/rollback을 확정한 뒤 snapshot을 잡는다.
+      // 이 promise를 ref에 공개하므로 이후 단건 요청은 전체 요청 뒤에 이어진다.
+      await Promise.allSettled([...readInFlightRef.current.values()]);
+      if (stateGenerationRef.current !== stateGeneration) return;
+
+      const snapshotItems = itemsRef.current;
+      const snapshotUnreadCount = unreadCountRef.current;
+      updateItems((current) =>
+        current.map((notification) => ({ ...notification, isRead: true })),
+      );
+      commitUnreadCount(0);
+
+      try {
+        await markAllNotificationsRead();
+      } catch {
+        if (stateGenerationRef.current === stateGeneration) {
+          commitItems(snapshotItems);
+          commitUnreadCount(snapshotUnreadCount);
+        }
+      }
+    })();
+    markAllInFlightRef.current = operation;
+
+    try {
+      await operation;
+    } finally {
+      if (markAllInFlightRef.current === operation) {
+        markAllInFlightRef.current = null;
+      }
+    }
+  }, [commitItems, commitUnreadCount, updateItems]);
 
   // 삭제 후 리스트가 적게 남고 hasNext면 빈 화면 방지 위해 다음 페이지를
   // 한 번 끌어옴. loading 중엔 호출 안 함 → 무한루프 가드. 임계치는 페이지
@@ -257,65 +318,60 @@ export function NotificationProvider({
   }, [hasNext, loading, loadMore]);
 
   const removeNotification = useCallback(
-    async (id: number) => {
-      let snapshot: AppNotification[] = [];
-      let nextLength = 0;
-      setItems((prev) => {
-        if (!prev.some((n) => n.id === id)) return prev;
-        snapshot = prev;
-        const next = prev.filter((n) => n.id !== id);
-        nextLength = next.length;
-        return next;
-      });
-      if (snapshot.length === 0) return;
+    async (id: NotificationId) => {
+      const snapshot = itemsRef.current;
+      if (!snapshot.some((notification) => notification.id === id)) return;
+
+      const next = snapshot.filter((notification) => notification.id !== id);
+      commitItems(next);
       try {
         await deleteNotification(id);
-        maybeBackfill(nextLength);
+        maybeBackfill(next.length);
       } catch {
-        setItems(snapshot);
+        commitItems(snapshot);
       }
     },
-    [maybeBackfill],
+    [commitItems, maybeBackfill],
   );
 
   const removeNotifications = useCallback(
-    async (ids: number[]) => {
+    async (ids: NotificationId[]) => {
       if (ids.length === 0) return;
-      let snapshot: AppNotification[] = [];
-      let nextLength = 0;
       const idSet = new Set(ids);
-      setItems((prev) => {
-        if (!prev.some((n) => idSet.has(n.id))) return prev;
-        snapshot = prev;
-        const next = prev.filter((n) => !idSet.has(n.id));
-        nextLength = next.length;
-        return next;
-      });
-      if (snapshot.length === 0) return;
+      const snapshot = itemsRef.current;
+      if (!snapshot.some((notification) => idSet.has(notification.id))) return;
+
+      const next = snapshot.filter(
+        (notification) => !idSet.has(notification.id),
+      );
+      commitItems(next);
       try {
         await deleteNotifications(ids);
-        maybeBackfill(nextLength);
+        maybeBackfill(next.length);
       } catch {
-        setItems(snapshot);
+        commitItems(snapshot);
       }
     },
-    [maybeBackfill],
+    [commitItems, maybeBackfill],
   );
 
   // Auth-driven lifecycle: first fetch when authenticated, clear on logout.
   useEffect(() => {
     if (!isAuthenticated) {
-      setItems([]);
+      stateGenerationRef.current += 1;
+      commitItems([]);
       setNextCursor(null);
       setHasNext(true);
-      setUnreadCount(0);
+      commitUnreadCount(0);
+      readInFlightRef.current.clear();
+      markAllInFlightRef.current = null;
       initialFetchedRef.current = false;
       return;
     }
     if (initialFetchedRef.current) return;
     initialFetchedRef.current = true;
     refresh();
-  }, [isAuthenticated, refresh]);
+  }, [isAuthenticated, refresh, commitItems, commitUnreadCount]);
 
   // Background→active 복귀 시 배지만 가볍게 동기화 — 다른 앱 보다가 KeepEat
   // 으로 돌아온 순간 종 옆 숫자가 곧장 맞도록. 목록(items)은 안 건드림
@@ -335,33 +391,27 @@ export function NotificationProvider({
     return () => sub.remove();
   }, [maybeRefreshUnreadCount]);
 
-  // 세 진입 경로(드롭다운 onTap / OS 푸시 탭 / 콜드스타트) 공통 라우팅 — 단일
-  // 결정 함수 resolveNotificationAction으로 통일. 새 푸시 전제라 isRead=false,
-  // ready 가드는 swipe 화면(A-1)에 위임하므로 isRecommendationReady=true.
-  // RECIPE_READY 읽음은 결과를 실제로 보여줄 때만 처리해야 하므로(A-1) 진입
-  // 경로에선 markType을 건너뛰고 swipe 화면에 위임 — 결과 못 본 채 읽힘 방지.
-  // EXPIRY_SOON/NOTICE는 진입 시 즉시 읽음(NOTICE는 route 없어도 읽음 → ★4 해소).
-  const applyEntryAction = useCallback(
-    (domainType: NotificationType) => {
-      const action = resolveNotificationAction(domainType, {
-        isRead: false,
-        isRecommendationReady: true,
-      });
-      if (action.markType && action.markType !== "recipe_ready") {
-        markTypeRead(action.markType);
+  // 알림함 카드, foreground dropdown, OS push response가 공유하는 유일한 탭
+  // handler. 개별 읽음 실패는 내부에서 rollback하며 navigation을 막지 않는다.
+  // notificationId가 없는 구형 push는 읽음 API 없이 type route만 수행한다.
+  const handleNotificationPress = useCallback(
+    ({ notificationId, type }: NotificationPushData) => {
+      if (notificationId !== undefined) {
+        void markRead(notificationId);
       }
-      if (action.route) {
-        router.push(action.route);
+      if (type !== undefined) {
+        const route = routeForNotificationType(type);
+        if (route) router.push(route);
       }
     },
-    [markTypeRead],
+    [markRead],
   );
 
   // Foreground push reception: the OS handler suppresses the banner for all
   // types (see RecipeRecommendationContext.setNotificationHandler) — we
   // surface a light in-app drop-down instead and refresh so the badge updates
-  // without waiting for the user to open the tray. The drop-down's onTap routes
-  // via the same applyEntryAction as a real push tap (단일 결정 함수 공유).
+  // without waiting for the user to open the tray. Showing the dropdown alone
+  // never changes read state; only its explicit tap reaches the common handler.
   const { showNotification } = useToast();
   useEffect(() => {
     if (!isAuthenticated) return;
@@ -371,19 +421,19 @@ export function NotificationProvider({
       if (!body) return;
       // 제목 줄로 쓸 푸시 title. 없으면 NotificationView가 "KeepEat" fallback.
       const title = notif.request.content.title ?? undefined;
-      const apiType = notif.request.content.data?.type;
-      const domainType =
-        typeof apiType === "string" ? toDomainNotificationType(apiType) : null;
-      if (domainType) {
-        // 모든 유효 타입에 onTap 부착 — NOTICE는 route 없이 읽음만(★4), 그 외엔
-        // 라우팅. RECIPE_READY 읽음은 swipe에 위임(applyEntryAction이 스킵).
-        showNotification(body, () => applyEntryAction(domainType), title);
-      } else {
-        showNotification(body, undefined, title);
-      }
+      const pushData = parseNotificationPushData(notif.request.content.data);
+      const isActionable =
+        pushData.notificationId !== undefined || pushData.type !== undefined;
+      showNotification(
+        body,
+        isActionable
+          ? () => handleNotificationPress(pushData)
+          : undefined,
+        title,
+      );
     });
     return () => sub.remove();
-  }, [isAuthenticated, refresh, showNotification, applyEntryAction]);
+  }, [isAuthenticated, refresh, showNotification, handleNotificationPress]);
 
   // Tap response listener: routes by payload type for both foreground taps
   // (after toast) and background-pull taps. Cold-start initial route is
@@ -392,15 +442,20 @@ export function NotificationProvider({
     if (!isAuthenticated) return;
     const sub = Notifications.addNotificationResponseReceivedListener(
       (response) => {
-        const apiType = response.notification.request.content.data?.type;
-        if (typeof apiType !== "string") return;
-        const domainType = toDomainNotificationType(apiType);
-        if (!domainType) return;
-        applyEntryAction(domainType);
+        const pushData = parseNotificationPushData(
+          response.notification.request.content.data,
+        );
+        if (
+          pushData.notificationId === undefined &&
+          pushData.type === undefined
+        ) {
+          return;
+        }
+        handleNotificationPress(pushData);
       },
     );
     return () => sub.remove();
-  }, [isAuthenticated, applyEntryAction]);
+  }, [isAuthenticated, handleNotificationPress]);
 
   // Cold-start: if the app was launched by tapping a push, route once.
   // A ref guards against the strict-mode double-mount re-firing the same
@@ -413,11 +468,16 @@ export function NotificationProvider({
     Notifications.getLastNotificationResponseAsync()
       .then((response) => {
         if (cancelled || !response) return;
-        const apiType = response.notification.request.content.data?.type;
-        if (typeof apiType !== "string") return;
-        const domainType = toDomainNotificationType(apiType);
-        if (!domainType) return;
-        applyEntryAction(domainType);
+        const pushData = parseNotificationPushData(
+          response.notification.request.content.data,
+        );
+        if (
+          pushData.notificationId === undefined &&
+          pushData.type === undefined
+        ) {
+          return;
+        }
+        handleNotificationPress(pushData);
       })
       // 네이티브 API 실패 — unhandled rejection 방지용 silent catch.
       // 콜드 스타트 라우팅이 실패할 뿐 사용자 플로우엔 영향 없음.
@@ -425,7 +485,7 @@ export function NotificationProvider({
     return () => {
       cancelled = true;
     };
-  }, [isAuthenticated, applyEntryAction]);
+  }, [isAuthenticated, handleNotificationPress]);
 
   const value = useMemo<NotificationContextValue>(
     () => ({
@@ -435,9 +495,8 @@ export function NotificationProvider({
       loading,
       refresh,
       loadMore,
-      markRead,
       markAllRead,
-      markTypeRead,
+      handleNotificationPress,
       removeNotification,
       removeNotifications,
       maybeRefreshUnreadCount,
@@ -449,9 +508,8 @@ export function NotificationProvider({
       loading,
       refresh,
       loadMore,
-      markRead,
       markAllRead,
-      markTypeRead,
+      handleNotificationPress,
       removeNotification,
       removeNotifications,
       maybeRefreshUnreadCount,

@@ -4,22 +4,21 @@
  * Renders as an iOS-style full-screen modal: header (title + close + mark-all)
  * sits above a FlatList that grows via cursor-based infinite scroll. The
  * popup is purely presentational — paging state, loading flag, and the
- * mark-read callbacks all come from AppHeaderRight so the data lives next
- * to the unread-badge it drives.
+ * notification action callbacks all come from AppHeaderRight so the data
+ * lives next to the unread-badge it drives.
  *
  * Card design (icon bubble + title/body + relative time + unread dot) is
  * preserved from the previous popup; only the chrome around it changed.
  *
- * Routing
- *   Every card routes by `type` alone (recipe_ready → recipe tab, others →
- *   home). targetId hooks in A-2 once the backend supplies it.
+ * A card press passes only its notification ID and type to the shared
+ * notification handler. NOTICE stays in the tray and toggles its body;
+ * routed types close the tray before navigation.
  */
 
 import { useCallback, useEffect, useState } from "react";
 import { ActivityIndicator, FlatList, Modal, Pressable, StyleSheet, Text, View } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 import * as Haptics from "expo-haptics";
-import { useRouter } from "expo-router";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import {
   Colors,
@@ -31,10 +30,11 @@ import {
 } from "@/constants/theme";
 import type {
   AppNotification,
+  NotificationId,
+  NotificationPushData,
   NotificationType,
 } from "@/constants/domain";
 import { formatRelativeTime } from "@/utils/dateUtils";
-import { resolveNotificationAction } from "@/utils/notificationRouting";
 import { ConfirmModal } from "@/components/ConfirmModal";
 
 // Per-type icon + accent color. Kept inline (not a separate config file)
@@ -68,19 +68,12 @@ interface Props {
   hasNext: boolean;
   loading: boolean;
   onLoadMore: () => void;
-  onNotificationRead: (id: number) => void;
+  onNotificationPress: (data: NotificationPushData) => void;
   onMarkAllRead: () => void;
-  /**
-   * EXPIRY_SOON 카드 탭 시 즉시 호출 — destination 화면(냉장고 탭)에 이미
-   * 있을 때 router.push("/")가 navigation transition을 만들지 않아
-   * useFocusEffect가 재발화 안 하는 케이스를 직접 해결. markTypeRead는
-   * unread 0이면 no-op이라 destination focus와 중복 호출돼도 안전.
-   */
-  onMarkTypeRead: (type: NotificationType) => void;
   /** 일반 모드 카드 X 버튼 — 즉시 개별 삭제. 확인 모달 없음. */
-  onRemoveNotification: (id: number) => void;
+  onRemoveNotification: (id: NotificationId) => void;
   /** 다중선택 모드 "선택 N개 삭제" — ConfirmModal 후 호출. */
-  onRemoveNotifications: (ids: number[]) => void;
+  onRemoveNotifications: (ids: NotificationId[]) => void;
 }
 
 export function NotificationPopup({
@@ -91,28 +84,30 @@ export function NotificationPopup({
   hasNext,
   loading,
   onLoadMore,
-  onNotificationRead,
+  onNotificationPress,
   onMarkAllRead,
-  onMarkTypeRead,
   onRemoveNotification,
   onRemoveNotifications,
 }: Props) {
-  const router = useRouter();
   const insets = useSafeAreaInsets();
 
   // 본문 펼침 상태 — 목적지 없는 타입(NOTICE)이 카드 탭으로 본문을 펼치고 다시
   // 접을 수 있게 한다. 팝업이 닫힐 때 리셋해서 다음 오픈은 항상 collapsed 상태로.
-  const [expandedIds, setExpandedIds] = useState<Set<number>>(() => new Set());
+  const [expandedIds, setExpandedIds] = useState<Set<NotificationId>>(
+    () => new Set(),
+  );
 
   // 다중선택 모드 — "삭제" 버튼으로 진입. selectedIds는 체크된 알림 id 집합.
   // 모달 close 시 리셋해 잔상 방지. selectMode일 땐 카드의 X 숨김 + 카드 탭이
   // 토글로 바뀜(라우팅·펼침 무동작).
   const [selectMode, setSelectMode] = useState(false);
-  const [selectedIds, setSelectedIds] = useState<Set<number>>(() => new Set());
+  const [selectedIds, setSelectedIds] = useState<Set<NotificationId>>(
+    () => new Set(),
+  );
   // 일괄 삭제 확인 모달.
   const [confirmDeleteVisible, setConfirmDeleteVisible] = useState(false);
 
-  const toggleExpand = useCallback((id: number) => {
+  const toggleExpand = useCallback((id: NotificationId) => {
     setExpandedIds((prev) => {
       const next = new Set(prev);
       if (next.has(id)) next.delete(id);
@@ -131,7 +126,7 @@ export function NotificationPopup({
     }
   }, [visible]);
 
-  const toggleSelectId = useCallback((id: number) => {
+  const toggleSelectId = useCallback((id: NotificationId) => {
     setSelectedIds((prev) => {
       const next = new Set(prev);
       if (next.has(id)) next.delete(id);
@@ -171,34 +166,16 @@ export function NotificationPopup({
       return;
     }
 
-    // NOTICE: per-id 개별 읽음(미읽음일 때) + 본문 펼침/접힘. 팝업 유지 —
-    // 전체읽음으로 통일하지 않는 유일한 타입(사용자가 카드별로 본다). NOTICE
-    // 전체 읽음은 popup close 후 AppHeaderRight가 일괄 처리.
+    // NOTICE: 해당 카드 한 건만 읽고 본문을 펼치거나 접는다. 팝업을 닫아도
+    // 다른 NOTICE의 읽음 상태에는 영향을 주지 않는다.
     if (n.type === "notice") {
-      if (!n.isRead) onNotificationRead(n.id);
+      onNotificationPress({ notificationId: n.id, type: n.type });
       toggleExpand(n.id);
       return;
     }
 
-    // 그 외 타입: 단일 결정 함수 resolveNotificationAction으로 통일(세 경로 공통).
-    // 알림탭은 ready/already_read 가드를 swipe 화면(A-1)에 위임하므로
-    // isRecommendationReady=true, isRead=false로 공급 — RECIPE_READY는 읽음/상태
-    // 무관하게 항상 swipe로 보내고, 빈/로딩 안내는 swipe가 한다. RECIPE_READY
-    // 읽음도 swipe(결과 보여줄 때만)에 위임하므로 진입 시 markType은 스킵한다.
-    const action = resolveNotificationAction(n.type, {
-      isRead: false,
-      isRecommendationReady: true,
-    });
-    if (action.markType && action.markType !== "recipe_ready") {
-      onMarkTypeRead(action.markType);
-    }
-    if (action.route) {
-      onClose();
-      router.push(action.route as never);
-    } else {
-      // 목적지 없는 미래 타입 — 본문 펼침으로 폴백.
-      toggleExpand(n.id);
-    }
+    onClose();
+    onNotificationPress({ notificationId: n.id, type: n.type });
   };
 
   const renderFooter = () => {

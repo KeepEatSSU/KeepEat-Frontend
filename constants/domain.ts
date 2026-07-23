@@ -142,20 +142,27 @@ export type NotificationType =
   | "expiry_soon"
   | "recipe_ready";
 
+export type NotificationId = number;
+
 export interface AppNotification {
-  id: number;
+  id: NotificationId;
   type: NotificationType;
   title: string;
   body: string;
   /**
-   * 알림 탭 시 이동할 대상 ID(예: 식재료 ID, 레시피 ID). 백엔드 응답에 같이
-   * 옴. A-2에서 라우팅에 활용 예정 — 현재 mock에선 비워둠.
+   * 목록 API가 제공할 수 있는 대상 ID. 현재 라우팅과 Push payload 계약에서는
+   * 사용하지 않는다.
    */
   targetId?: number | string;
   isRead: boolean;
   /** ISO 8601 timestamp (e.g. "2026-05-10T09:30:00Z"). */
   createdAt: string;
 }
+
+export type NotificationPushData = {
+  notificationId?: NotificationId;
+  type?: NotificationType;
+};
 
 // ─── Shared Constants ─────────────────────────────────────────────────────────
 

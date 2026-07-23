@@ -9,7 +9,7 @@
  *   GET   /api/notifications?cursor=&size=20  → { notifications, nextCursor, hasNext }
  *   PATCH /api/notifications/{id}/read         → 200
  *   PATCH /api/notifications/read-all          → 200
- *   GET   /api/notifications/unread-count      → { unreadCount: number }   (future)
+ *   GET   /api/notifications/unread-count      → { unreadCount: number }
  *
  * `mocks/notifications.ts` is now unreferenced — left in place so the dev
  * can swap it back in if the backend list is empty during integration.
@@ -18,6 +18,7 @@
 import { api } from "@/services/api";
 import type {
   AppNotification,
+  NotificationId,
   NotificationType,
 } from "@/constants/domain";
 
@@ -38,23 +39,8 @@ const TYPE_MAP: Record<string, NotificationType> = {
   RECIPE_READY: "recipe_ready",
 };
 
-/** Backend's UPPER-case notification type enum. Mirrors the keys of TYPE_MAP. */
-export type BackendNotificationType =
-  | "NOTICE"
-  | "EXPIRY_SOON"
-  | "RECIPE_READY";
-
-/** Domain (lowercase) → backend (UPPER). The three types are pure
- *  toUpperCase, but routing through this helper keeps the type narrowing
- *  in one place and surfaces a compile error if the union ever drifts. */
-export function backendNotificationType(
-  type: NotificationType,
-): BackendNotificationType {
-  return type.toUpperCase() as BackendNotificationType;
-}
-
 interface RawNotification {
-  id: number;
+  id: NotificationId;
   type: string;
   title: string;
   body: string;
@@ -111,7 +97,7 @@ export async function fetchNotificationsPage(
 
 // ─── Read state ──────────────────────────────────────────────────────────────
 
-export async function markNotificationRead(id: number): Promise<void> {
+export async function markNotificationRead(id: NotificationId): Promise<void> {
   await api.patch(`/api/notifications/${id}/read`);
 }
 
@@ -119,21 +105,10 @@ export async function markAllNotificationsRead(): Promise<void> {
   await api.patch("/api/notifications/read-all");
 }
 
-/**
- * 타입별 일괄 읽음 — PATCH /api/notifications/read-all/{TYPE}.
- * `type`은 백엔드 enum(UPPER). domain의 lowercase에서 변환 시
- * `backendNotificationType()` 헬퍼를 거치면 type-safe.
- */
-export async function markTypeNotificationsRead(
-  type: BackendNotificationType,
-): Promise<void> {
-  await api.patch(`/api/notifications/read-all/${type}`);
-}
-
 // ─── Delete (DELETE /api/notifications/{id}, DELETE /api/notifications) ─────
 
 /** 단일 알림 삭제 — 일반 모드 카드 X 버튼이 호출. */
-export async function deleteNotification(id: number): Promise<void> {
+export async function deleteNotification(id: NotificationId): Promise<void> {
   await api.delete(`/api/notifications/${id}`);
 }
 
@@ -141,7 +116,9 @@ export async function deleteNotification(id: number): Promise<void> {
  * 일괄 알림 삭제 — 다중선택 모드에서 선택된 ids 배열로 요청. axios DELETE는
  * body를 `data`로 실어보낸다. `deleteUserIngredients` 패턴과 동일.
  */
-export async function deleteNotifications(ids: number[]): Promise<void> {
+export async function deleteNotifications(
+  ids: NotificationId[],
+): Promise<void> {
   await api.delete("/api/notifications", { data: { ids } });
 }
 

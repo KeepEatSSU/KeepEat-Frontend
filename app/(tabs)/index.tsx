@@ -29,7 +29,6 @@ import {
 } from "@/services/userIngredients";
 import { getErrorMessage } from "@/services/api";
 import { useIngredientMaster } from "@/context/IngredientMasterContext";
-import { useNotifications } from "@/context/NotificationContext";
 import { getDDayBadgeColor, getDDayInfo } from "@/utils/dateUtils";
 import { Ionicons } from "@expo/vector-icons";
 import * as Haptics from "expo-haptics";
@@ -271,10 +270,8 @@ const gridStyles = StyleSheet.create({
 // ─── Screen ───────────────────────────────────────────────────────────────────
 
 export default function FridgeScreen() {
-  const router = useRouter();
   const insets = useSafeAreaInsets();
   const { showTopToast } = useToast();
-  const { markTypeRead } = useNotifications();
   const { snapshot } = useIngredientMaster();
 
   // ── Async data state ──
@@ -527,15 +524,6 @@ export default function FridgeScreen() {
     useCallback(() => {
       fetchFridgeData();
     }, [fetchFridgeData]),
-  );
-
-  // Entering the home tab marks the home-targeted notification type as
-  // read. markTypeRead has a no-op gate when there's nothing unread, so
-  // firing on every focus is cheap (one render bailout + zero PATCH calls).
-  useFocusEffect(
-    useCallback(() => {
-      markTypeRead("expiry_soon");
-    }, [markTypeRead]),
   );
 
   // Server-side search with 300ms debounce. Empty query → fall back to the

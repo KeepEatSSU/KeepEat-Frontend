@@ -94,12 +94,17 @@
 | `fetchNotificationsPage` | `GET /api/notifications` | `cursor`, `size`, 기본 size 20 |
 | `markNotificationRead` | `PATCH /api/notifications/{id}/read` | 단건 읽음 |
 | `markAllNotificationsRead` | `PATCH /api/notifications/read-all` | 전체 읽음 |
-| `markTypeNotificationsRead` | `PATCH /api/notifications/read-all/{TYPE}` | 타입별 읽음 |
 | `deleteNotification` | `DELETE /api/notifications/{id}` | 단건 삭제 |
 | `deleteNotifications` | `DELETE /api/notifications` | body `{ ids }` |
 | `registerPushToken` | `POST /api/notifications/token` | body `{ token }` |
 | `deletePushToken` | `DELETE /api/notifications/token` | body `{ token }` |
 | `fetchUnreadCount` | `GET /api/notifications/unread-count` | `{ unreadCount }` |
+
+신규 Expo Push payload는 `notificationId`와 `type`을 사용한다. 프론트는
+숫자 문자열 ID를 양의 safe integer로 한 번만 정규화하며, 유효한 ID가 있는
+Push를 탭했을 때 `markNotificationRead`만 호출한다. ID가 없는 구형 Push는
+타입별 route만 수행하고 읽음 API를 호출하지 않는다. `targetId`는 현재 Push
+계약에 포함하지 않는다.
 
 ## TODO / 확인 필요
 
