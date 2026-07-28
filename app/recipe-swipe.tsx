@@ -422,10 +422,8 @@ function CompletionView({
 // 구분 못 해 시간 게이트가 필요하다.)
 const RESTORE_SETTLE_GRACE_MS = 1000;
 
-// 결과가 휘발(앱 종료 / 24h TTL 만료 / 콜드스타트 미복원)했는데 swipe로 진입한
-// 경우의 안내. 스와이프를 다 끝낸 CompletionView("아쉽네요!")와 구분 — 여긴 애초에
-// 보여줄 결과가 없던 상태다. R2(서버 '마지막 추천 결과 조회 GET')가 도입되면 이
-// 자리에서 서버 fetch로 결과를 복원해 바로 덱으로 보낼 수 있다.
+// 결과가 휘발(24h TTL 만료 등)했는데 swipe로 진입한 경우의 안내. 스와이프를
+// 다 끝낸 CompletionView("아쉽네요!")와 구분 — 여긴 보여줄 결과가 없던 상태다.
 function NoResultsView({ onRetry }: { onRetry: () => void }) {
   return (
     <View style={styles.completionArea}>
@@ -505,13 +503,13 @@ export default function RecipeSwipeScreen() {
 
   // 화면 상태 결정 (status-aware):
   //  • 덱 있음 → 다 봤으면 completed, 아니면 deck
-  //  • 덱 없음 → 복원이 정착(ready/swiping)했거나 grace 경과면 no-results,
-  //             아니면 loading(콜드스타트 복원 대기)
+  //  • 덱 없음 + 생성 중 → Push 탭이 result 200보다 먼저 route해도 loading
+  //  • 그 외 → 복원이 정착(ready/swiping)했거나 grace 경과면 no-results
   const hasDeck = recommendedRecipes.length > 0;
   const settled =
     recommendationStatus === "ready" ||
     recommendationStatus === "swiping" ||
-    settleElapsed;
+    (recommendationStatus !== "loading" && settleElapsed);
   const viewState: "loading" | "deck" | "completed" | "no-results" = hasDeck
     ? isComplete
       ? "completed"

@@ -1,8 +1,9 @@
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { type Recipe } from "@/constants/domain";
 import {
-  generateAiRecipes,
+  getAiRecipeResult,
   mapDifficulty,
+  requestAiRecipeGeneration,
   type GeneratedRecipeDto,
 } from "@/services/recipes";
 import { getErrorMessage } from "@/services/api";
@@ -18,15 +19,22 @@ import {
 } from "react";
 import { AppState, AppStateStatus } from "react-native";
 import { useToast } from "@/components/Toast";
+import { useAuth } from "@/context/AuthContext";
+import { parseNotificationPushData } from "@/utils/notificationRouting";
+import {
+  classifyRecipeResultHttpStatus,
+  RecipeResultPoller,
+  type RecipeResultErrorDisposition,
+  type RecipeResultTerminalFailure,
+} from "@/utils/recipeResultPoller";
 
 // ─── Persistence (B) ──────────────────────────────────────────────────────────
 // AsyncStorage cache of the latest completed AI recommendation. Survives
 // app kills so users who tap the RECIPE_READY push (or just re-open the app
 // after the result arrived) still have something to swipe.
 //
-// A-transition note: when the backend exposes a "latest generate result"
-// endpoint, swap the body of `loadPersistedRecommendation` for a server
-// GET — call sites (Provider mount) stay unchanged.
+// The server result endpoint is polled for an active generation. This cache is
+// still useful after a completed result has been fetched and mapped.
 
 const PERSIST_KEY = "keepeat:lastRecommendation";
 const PERSIST_TTL_MS = 24 * 60 * 60 * 1000; // 24h
@@ -103,6 +111,82 @@ interface RecipeRecommendationState {
   completedAt: Date | null;
 }
 
+function createInitialRecommendationState(): RecipeRecommendationState {
+  return {
+    status: "idle",
+    recommendedRecipes: [],
+    rawRecipes: [],
+    savedRecipes: [],
+    requestedAt: null,
+    completedAt: null,
+  };
+}
+
+function mapGeneratedRecipes(
+  generated: GeneratedRecipeDto[],
+  completedAtMs: number,
+): Recipe[] {
+  return generated.map((dto, index) => ({
+    id: `ai-gen-${completedAtMs}-${index}`,
+    title: dto.recipeName,
+    time: dto.cookingTime,
+    difficulty: mapDifficulty(dto.difficulty),
+    kcal: dto.calories,
+    method: dto.cookingMethod,
+    ingredients: dto.requiredIngredients.map((ingredient) => ingredient.name),
+    steps: dto.instructions,
+    matchCount: dto.requiredIngredients.length,
+    totalCount: dto.requiredIngredients.length,
+  }));
+}
+
+function classifyRecipeResultError(
+  error: unknown,
+): RecipeResultErrorDisposition {
+  if (!isAxiosError(error)) return "terminal";
+  return classifyRecipeResultHttpStatus(error.response?.status);
+}
+
+function getRecipeResultFailureMessage(
+  failure: RecipeResultTerminalFailure,
+): string {
+  if (failure.reason === "timeout") {
+    return "레시피 생성 시간이 초과됐어요. 다시 요청해 주세요.";
+  }
+  if (failure.reason === "transient-retries-exhausted") {
+    return getErrorMessage(
+      failure.error,
+      "네트워크 연결이 불안정해 결과를 불러오지 못했어요.",
+    );
+  }
+
+  const status = isAxiosError(failure.error)
+    ? failure.error.response?.status
+    : undefined;
+  switch (status) {
+    case 404:
+      return getErrorMessage(
+        failure.error,
+        "진행 중인 레시피 생성 요청을 찾을 수 없어요. 다시 요청해 주세요.",
+      );
+    case 500:
+      return getErrorMessage(
+        failure.error,
+        "생성된 레시피를 처리하지 못했어요. 다시 요청해 주세요.",
+      );
+    case 502:
+      return getErrorMessage(
+        failure.error,
+        "AI 레시피 생성 서비스에 연결하지 못했어요. 다시 요청해 주세요.",
+      );
+    default:
+      return getErrorMessage(
+        failure.error,
+        "레시피 결과를 불러오는 중에 오류가 발생했어요.",
+      );
+  }
+}
+
 interface RecipeRecommendationContextValue extends RecipeRecommendationState {
   requestRecommendation: () => Promise<void>;
   markSwiping: () => void;
@@ -110,8 +194,6 @@ interface RecipeRecommendationContextValue extends RecipeRecommendationState {
   discardRecipe: (recipe: Recipe) => void;
   finishSwiping: () => void;
   reset: () => void;
-  /** Register a callback to be invoked when recommendation completes (for in-app notification) */
-  onComplete: (cb: (() => void) | null) => void;
 }
 
 // ─── Notification Setup ───────────────────────────────────────────────────────
@@ -150,7 +232,6 @@ const RecipeRecommendationContext =
     discardRecipe: () => {},
     finishSwiping: () => {},
     reset: () => {},
-    onComplete: () => {},
   });
 
 export const useRecipeRecommendation = () =>
@@ -163,49 +244,120 @@ export function RecipeRecommendationProvider({
 }: {
   children: React.ReactNode;
 }) {
-  const [state, setState] = useState<RecipeRecommendationState>({
-    status: "idle",
-    recommendedRecipes: [],
-    rawRecipes: [],
-    savedRecipes: [],
-    requestedAt: null,
-    completedAt: null,
-  });
-
+  const [state, setState] = useState<RecipeRecommendationState>(
+    createInitialRecommendationState,
+  );
   const { showTopToast } = useToast();
+  const { isAuthenticated, isLoading: isAuthLoading } = useAuth();
   const appStateRef = useRef<AppStateStatus>(AppState.currentState);
-  const onCompleteRef = useRef<(() => void) | null>(null);
+  const statusRef = useRef<RecommendationStatus>("idle");
+  const mountedRef = useRef(true);
+  const isAuthenticatedRef = useRef(isAuthenticated);
+  const requestGenerationRef = useRef(0);
+  const requestInFlightRef = useRef<Promise<void> | null>(null);
+  const cacheWriteGenerationRef = useRef(0);
+  const pollerRef = useRef<RecipeResultPoller<GeneratedRecipeDto[]> | null>(
+    null,
+  );
 
-  const onComplete = useCallback((cb: (() => void) | null) => {
-    onCompleteRef.current = cb;
-  }, []);
+  isAuthenticatedRef.current = isAuthenticated;
 
   // (Permission request used to live here, fired on Provider mount. It moved
   // to <PushPermissionPrompt> in _layout.tsx so users see a friendly rationale
   // before the OS dialog appears, and so the dialog only shows once — gated
   // by an AsyncStorage flag — rather than every cold start.)
 
-  // Track app foreground/background
+  const handleCompletion = useCallback((rawList: GeneratedRecipeDto[]) => {
+    if (!mountedRef.current || !isAuthenticatedRef.current) return;
+
+    const completedAt = new Date();
+    const recipes = mapGeneratedRecipes(rawList, completedAt.getTime());
+    statusRef.current = "ready";
+    setState((prev) => ({
+      ...prev,
+      status: "ready",
+      recommendedRecipes: recipes,
+      rawRecipes: rawList,
+      savedRecipes: [],
+      completedAt,
+    }));
+
+    const cacheGeneration = ++cacheWriteGenerationRef.current;
+    void savePersistedRecommendation({
+      recommendedRecipes: recipes,
+      rawRecipes: rawList,
+      completedAt: completedAt.toISOString(),
+    }).then(() => {
+      if (cacheWriteGenerationRef.current !== cacheGeneration) {
+        void clearPersistedRecommendation();
+      }
+    });
+
+  }, []);
+
+  const handlePollingTerminal = useCallback(
+    (failure: RecipeResultTerminalFailure) => {
+      if (!mountedRef.current || !isAuthenticatedRef.current) return;
+      statusRef.current = "error";
+      setState((prev) => ({ ...prev, status: "error" }));
+      showTopToast({
+        message: getRecipeResultFailureMessage(failure),
+        variant: "error",
+      });
+    },
+    [showTopToast],
+  );
+
+  const completionHandlerRef = useRef(handleCompletion);
+  const pollingTerminalHandlerRef = useRef(handlePollingTerminal);
+  completionHandlerRef.current = handleCompletion;
+  pollingTerminalHandlerRef.current = handlePollingTerminal;
+
+  if (pollerRef.current === null) {
+    pollerRef.current = new RecipeResultPoller<GeneratedRecipeDto[]>({
+      fetchResult: getAiRecipeResult,
+      classifyError: classifyRecipeResultError,
+      onComplete: (result) => completionHandlerRef.current(result),
+      onTerminal: (failure) =>
+        pollingTerminalHandlerRef.current(failure),
+      isForeground: () => appStateRef.current === "active",
+    });
+  }
+
+  const invalidateActiveRun = useCallback(() => {
+    requestGenerationRef.current += 1;
+    requestInFlightRef.current = null;
+    pollerRef.current?.cancel();
+  }, []);
+
+  // Pause timer scheduling while inactive, then query immediately on a real
+  // background/inactive → active transition. Initial active mount is ignored.
   useEffect(() => {
     const sub = AppState.addEventListener("change", (next) => {
+      const previous = appStateRef.current;
       appStateRef.current = next;
+
+      if (next !== "active") {
+        pollerRef.current?.pause();
+        return;
+      }
+      if (previous === "background" || previous === "inactive") {
+        void pollerRef.current?.resume();
+      }
     });
     return () => sub.remove();
   }, []);
 
-  // Restore the most-recent recommendation (if still within TTL) on mount.
-  // This makes the result survive app kills: user backgrounds during
-  // generation → receives RECIPE_READY push → re-opens app → sees the
-  // "눌러서 레시피 확인하기" CTA instead of an empty state.
-  // Only restores when state is still idle so an in-flight `requestRecommendation`
-  // can't be clobbered mid-call.
+  // Restore only after the authenticated user is known. An active request or
+  // push-triggered recovery wins over a late cache read.
   useEffect(() => {
+    if (isAuthLoading || !isAuthenticated) return;
     let cancelled = false;
-    (async () => {
-      const cached = await loadPersistedRecommendation();
+    void loadPersistedRecommendation().then((cached) => {
       if (cancelled || !cached) return;
       setState((prev) => {
         if (prev.status !== "idle") return prev;
+        statusRef.current = "ready";
         return {
           ...prev,
           status: "ready",
@@ -214,116 +366,175 @@ export function RecipeRecommendationProvider({
           completedAt: new Date(cached.completedAt),
         };
       });
-    })();
+    });
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [isAuthenticated, isAuthLoading]);
 
-  const handleCompletion = useCallback(
-    (recipes: Recipe[], rawList: GeneratedRecipeDto[]) => {
-      const completedAt = new Date();
-      setState((prev) => ({
-        ...prev,
-        status: "ready",
-        recommendedRecipes: recipes,
-        rawRecipes: rawList,
-        completedAt,
-      }));
+  // Logout invalidates timers and late responses and clears user-scoped
+  // recommendation state. The auth-loading phase is not treated as logout.
+  useEffect(() => {
+    if (isAuthLoading || isAuthenticated) return;
+    invalidateActiveRun();
+    cacheWriteGenerationRef.current += 1;
+    statusRef.current = "idle";
+    setState(createInitialRecommendationState());
+    void clearPersistedRecommendation();
+  }, [isAuthenticated, isAuthLoading, invalidateActiveRun]);
 
-      // Persist so the result survives app kills (e.g. user backgrounds
-      // the app during generation, receives RECIPE_READY push, re-opens
-      // after JS was killed). Fire-and-forget — storage failures are
-      // tolerable, the in-memory state already reflects the result.
-      savePersistedRecommendation({
-        recommendedRecipes: recipes,
-        rawRecipes: rawList,
-        completedAt: completedAt.toISOString(),
-      });
+  useEffect(() => {
+    mountedRef.current = true;
+    return () => {
+      mountedRef.current = false;
+      invalidateActiveRun();
+    };
+  }, [invalidateActiveRun]);
 
-      // Foreground only — surface as the registered in-app callback (toast).
-      // Background notification was previously fired here via
-      // scheduleNotificationAsync, but the backend now sends a RECIPE_READY
-      // remote push for the same event; firing both produced duplicate
-      // alerts. AppState ref is kept for the foreground vs background
-      // discrimination here.
-      if (appStateRef.current === "active") {
-        onCompleteRef.current?.();
-      }
-    },
-    [],
-  );
+  const recoverResultFromPush = useCallback(() => {
+    if (!isAuthenticatedRef.current) return;
+    const poller = pollerRef.current;
+    if (!poller) return;
+    if (poller.isRunning) {
+      void poller.expedite();
+      return;
+    }
 
-  const requestRecommendation = useCallback(async () => {
-    if (state.status === "loading") return;
-
+    // A cold-start/background push can outlive the JS process that submitted
+    // the request. Recover the current user's result without issuing a second
+    // POST. Ready/swiping results ignore delayed duplicate pushes.
+    if (statusRef.current !== "idle" && statusRef.current !== "error") return;
+    requestGenerationRef.current += 1;
+    const startedAt = Date.now();
+    statusRef.current = "loading";
     setState((prev) => ({
       ...prev,
       status: "loading",
-      recommendedRecipes: [],
-      rawRecipes: [],
-      savedRecipes: [],
-      requestedAt: new Date(),
-      completedAt: null,
+      requestedAt: new Date(startedAt),
+    }));
+    void poller.start(startedAt);
+  }, []);
+
+  // RECIPE_READY is an accelerator, not the sole completion mechanism.
+  // Foreground reception and a push tap share the same poller in-flight guard.
+  useEffect(() => {
+    if (!isAuthenticated) return;
+
+    const handlePushData = (data: unknown) => {
+      if (parseNotificationPushData(data).type === "recipe_ready") {
+        recoverResultFromPush();
+      }
+    };
+    const receivedSub = Notifications.addNotificationReceivedListener(
+      (notification) => handlePushData(notification.request.content.data),
+    );
+    const responseSub =
+      Notifications.addNotificationResponseReceivedListener((response) =>
+        handlePushData(response.notification.request.content.data),
+      );
+
+    return () => {
+      receivedSub.remove();
+      responseSub.remove();
+    };
+  }, [isAuthenticated, recoverResultFromPush]);
+
+  const requestRecommendation = useCallback(async () => {
+    const existingRequest = requestInFlightRef.current;
+    if (existingRequest) {
+      await existingRequest;
+      return;
+    }
+    if (
+      !isAuthenticatedRef.current ||
+      pollerRef.current?.isRunning ||
+      (statusRef.current !== "idle" && statusRef.current !== "error")
+    ) {
+      return;
+    }
+
+    invalidateActiveRun();
+    const requestGeneration = requestGenerationRef.current;
+    statusRef.current = "loading";
+    setState((prev) => ({
+      ...prev,
+      status: "loading",
+      requestedAt: null,
     }));
 
-    // "2분 소요" 안내 — 요청 시작 직후 띄움. Toast 시스템이 single-instance
-    // 라(`clearTimeout` 후 즉시 교체) 빠른 에러가 와도 catch의 에러 토스트가
-    // 안내를 자동으로 dismiss + 교체 → 두 토스트가 동시에 보일 일 없음.
-    // 호출처(recipe.tsx)에서 타이밍 추측(setTimeout) 없이 결과 기반 분기.
     showTopToast({
       message: "레시피 생성에 최대 2분이 소요됩니다. 완료되면 알려드릴게요!",
       variant: "info",
     });
 
-    try {
-      const generated = await generateAiRecipes();
-      // Map GeneratedRecipeDto back to domain Recipe to feed the swipe UI.
-      // The raw `generated` list is stored alongside so a save round-trip
-      // can reuse the unmodified DTO instead of reverse-mapping.
-      const mappedRecipes: Recipe[] = generated.map((dto, i) => ({
-        id: `ai-gen-${Date.now()}-${i}`,
-        title: dto.recipeName,
-        time: dto.cookingTime,
-        difficulty: mapDifficulty(dto.difficulty),
-        kcal: dto.calories,
-        method: dto.cookingMethod,
-        ingredients: dto.requiredIngredients.map((ing) => ing.name),
-        steps: dto.instructions,
-        matchCount: dto.requiredIngredients.length,
-        totalCount: dto.requiredIngredients.length,
-      }));
+    const operation = (async () => {
+      try {
+        await requestAiRecipeGeneration();
+      } catch (error) {
+        if (
+          requestGenerationRef.current !== requestGeneration ||
+          !mountedRef.current ||
+          !isAuthenticatedRef.current
+        ) {
+          return;
+        }
 
-      handleCompletion(mappedRecipes, generated);
-    } catch (error) {
-      // console.log 사용 — console.error는 RN dev LogBox 빨간 박스를 띄워
-      // 이미 토스트로 처리되는 친화 에러까지 시각적으로 두 번 노출됨.
-      // 디버깅 로그는 유지하되 LogBox 트리거만 회피.
-      console.log("[Recipe Gen Error]", error);
-      setState((prev) => ({ ...prev, status: "idle" }));
-      // 400(식재료 부족)과 그 외(서버 오류)는 폴백 카피가 달라 분기 유지.
-      // 두 경로 모두 getErrorMessage를 통과해 서버 message가 있으면 우선 노출.
-      if (isAxiosError(error) && error.response?.status === 400) {
-        showTopToast({
-          message: getErrorMessage(
-            error,
-            "식재료가 부족해요. 냉장고를 더 채워주세요!",
-          ),
-          variant: "warning",
-        });
-      } else {
-        showTopToast({
-          message: getErrorMessage(
-            error,
-            "레시피를 생성하는 중에 오류가 발생했어요.",
-          ),
-          variant: "error",
-        });
+        // 409 means the server already has this user's generation in flight.
+        // Join it through /result instead of issuing another POST or failing.
+        if (!isAxiosError(error) || error.response?.status !== 409) {
+          console.log("[Recipe Gen Error]", error);
+          statusRef.current = "error";
+          setState((prev) => ({ ...prev, status: "error" }));
+          if (isAxiosError(error) && error.response?.status === 400) {
+            showTopToast({
+              message: getErrorMessage(
+                error,
+                "식재료가 부족해요. 냉장고를 더 채워주세요!",
+              ),
+              variant: "warning",
+            });
+          } else {
+            showTopToast({
+              message: getErrorMessage(
+                error,
+                "레시피 생성을 요청하지 못했어요.",
+              ),
+              variant: "error",
+            });
+          }
+          return;
+        }
+      }
+
+      if (
+        requestGenerationRef.current !== requestGeneration ||
+        !mountedRef.current ||
+        !isAuthenticatedRef.current
+      ) {
+        return;
+      }
+
+      const acceptedAt = Date.now();
+      setState((prev) => ({
+        ...prev,
+        requestedAt: new Date(acceptedAt),
+      }));
+      await pollerRef.current?.start(acceptedAt);
+    })();
+
+    requestInFlightRef.current = operation;
+    try {
+      await operation;
+    } finally {
+      if (requestInFlightRef.current === operation) {
+        requestInFlightRef.current = null;
       }
     }
-  }, [state.status, handleCompletion, showTopToast]);
+  }, [invalidateActiveRun, showTopToast]);
 
   const markSwiping = useCallback(() => {
+    if (statusRef.current !== "ready") return;
+    statusRef.current = "swiping";
     setState((prev) => ({ ...prev, status: "swiping" }));
   }, []);
 
@@ -339,6 +550,9 @@ export function RecipeRecommendationProvider({
   }, []);
 
   const finishSwiping = useCallback(() => {
+    invalidateActiveRun();
+    cacheWriteGenerationRef.current += 1;
+    statusRef.current = "idle";
     setState((prev) => ({
       ...prev,
       status: "idle",
@@ -347,20 +561,16 @@ export function RecipeRecommendationProvider({
     }));
     // Consumed → drop the persisted cache so the next mount doesn't
     // resurrect already-handled recommendations.
-    clearPersistedRecommendation();
-  }, []);
+    void clearPersistedRecommendation();
+  }, [invalidateActiveRun]);
 
   const reset = useCallback(() => {
-    setState({
-      status: "idle",
-      recommendedRecipes: [],
-      rawRecipes: [],
-      savedRecipes: [],
-      requestedAt: null,
-      completedAt: null,
-    });
-    clearPersistedRecommendation();
-  }, []);
+    invalidateActiveRun();
+    cacheWriteGenerationRef.current += 1;
+    statusRef.current = "idle";
+    setState(createInitialRecommendationState());
+    void clearPersistedRecommendation();
+  }, [invalidateActiveRun]);
 
   return (
     <RecipeRecommendationContext.Provider
@@ -372,7 +582,6 @@ export function RecipeRecommendationProvider({
         discardRecipe,
         finishSwiping,
         reset,
-        onComplete,
       }}
     >
       {children}

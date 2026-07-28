@@ -67,16 +67,14 @@ interface NotificationContextValue {
   /**
    * 배지(unreadCount)만 가볍게 동기화하는 throttle 내장 진입점. 목록은 안
    * 건드림 — refresh()와 달리 페이지 GET / cursor / loading 토글이 없어 탭
-   * 전환·앱 복귀 같은 빈번한 트리거에서 부담 없이 호출 가능. 마지막 호출 후
-   * UNREAD_REFRESH_THROTTLE_MS 이내 재호출은 스킵. AppState 복귀와 탭 전환이
-   * 같은 ref를 공유해 연속 발화가 1회로 흡수된다.
+   * 전환 같은 빈번한 트리거에서 부담 없이 호출 가능. 마지막 호출 후
+   * UNREAD_REFRESH_THROTTLE_MS 이내 재호출은 스킵한다.
    */
   maybeRefreshUnreadCount: () => void;
 }
 
-// 경량 unread-count 갱신 throttle 간격. 탭 전환 연타·앱 복귀+첫 focus 동시
-// 발화를 1회로 흡수하되, 의도적 재확인(예: 다른 탭 갔다 수 초 뒤 복귀) 반응성은
-// 유지하는 균형값.
+// 경량 unread-count 갱신 throttle 간격. 탭 전환 연타를 흡수하되, 의도적
+// 재확인(예: 다른 탭 갔다 수 초 뒤 복귀) 반응성은 유지하는 균형값.
 const UNREAD_REFRESH_THROTTLE_MS = 5000;
 
 const NotificationContext = createContext<NotificationContextValue | undefined>(
@@ -115,13 +113,15 @@ export function NotificationProvider({
   >(new Map());
   const markAllInFlightRef = useRef<Promise<void> | null>(null);
   const stateGenerationRef = useRef(0);
+  // count-only GET이 읽음 mutation이나 전체 refresh보다 늦게 도착해 최신
+  // optimistic/server state를 덮지 못하도록 요청 세대를 무효화한다.
+  const unreadCountRequestGenerationRef = useRef(0);
 
-  // ref (not state) keeps `refresh` identity stable — open-modal subscribers
-  // can include it in useEffect deps without retrigger loops.
-  const refreshingRef = useRef(false);
+  // 진행 중인 전체 refresh Promise를 공유해 foreground push, 알림함 open,
+  // AppState resume가 겹쳐도 한 요청만 실행하고 읽음 mutation과 직렬화한다.
+  const refreshingRef = useRef<Promise<void> | null>(null);
   const initialFetchedRef = useRef(false);
-  // 경량 unread-count 갱신의 throttle 타임스탬프. AppState 복귀·탭 전환이
-  // 공유해 5초 내 연속 트리거를 1회로 흡수.
+  // 탭 전환 기반 경량 unread-count 갱신의 throttle 타임스탬프.
   const lastUnreadFetchRef = useRef<number>(0);
 
   const commitItems = useCallback((next: AppNotification[]) => {
@@ -145,10 +145,26 @@ export function NotificationProvider({
   }, []);
 
   const refresh = useCallback(async () => {
-    if (refreshingRef.current) return;
-    refreshingRef.current = true;
-    setLoading(true);
-    try {
+    const existing = refreshingRef.current;
+    if (existing) {
+      await existing;
+      return;
+    }
+
+    const stateGeneration = stateGenerationRef.current;
+    const operation = (async () => {
+      setLoading(true);
+      // 이미 시작된 count-only GET은 이 전체 refresh보다 오래된 결과다.
+      unreadCountRequestGenerationRef.current += 1;
+
+      // 먼저 시작된 읽음 mutation을 정착시킨 뒤 서버 최신값을 조회한다.
+      // 이 operation이 refreshingRef에 공개된 뒤 시작되는 mutation은 반대로
+      // refresh 완료를 기다리므로 양방향 순서에서 stale overwrite가 없다.
+      const markAllInFlight = markAllInFlightRef.current;
+      if (markAllInFlight) await markAllInFlight;
+      await Promise.allSettled([...readInFlightRef.current.values()]);
+      if (stateGenerationRef.current !== stateGeneration) return;
+
       // 페이지 GET과 unread-count GET을 병렬로. 한쪽 실패가 다른 쪽을 막지
       // 않도록 allSettled. 페이지 실패 시엔 list state를 유지(기존 정책)하고,
       // unread-count 실패 시엔 배지도 그대로 둔다(stale ≪ wiping).
@@ -156,28 +172,62 @@ export function NotificationProvider({
         fetchNotificationsPage(null),
         fetchUnreadCount(),
       ]);
+      if (stateGenerationRef.current !== stateGeneration) return;
+
       if (pageResult.status === "fulfilled") {
         commitItems(pageResult.value.items);
         setNextCursor(pageResult.value.nextCursor);
         setHasNext(pageResult.value.hasNext);
       }
       if (countResult.status === "fulfilled") {
+        // 직후 탭 focus가 같은 count를 다시 요청하지 않도록 경량 refresh
+        // throttle에도 전체 refresh 성공 시각을 공유한다.
+        lastUnreadFetchRef.current = Date.now();
         commitUnreadCount(countResult.value);
       }
+    })();
+    refreshingRef.current = operation;
+
+    try {
+      await operation;
     } finally {
-      setLoading(false);
-      refreshingRef.current = false;
+      if (refreshingRef.current === operation) {
+        refreshingRef.current = null;
+        setLoading(false);
+      }
     }
   }, [commitItems, commitUnreadCount]);
 
   const maybeRefreshUnreadCount = useCallback(() => {
     if (!isAuthenticated) return;
+    // 전체 refresh 또는 읽음 mutation이 이미 server truth를 정리 중이면
+    // count-only GET을 추가하지 않는다.
+    if (
+      refreshingRef.current ||
+      markAllInFlightRef.current ||
+      readInFlightRef.current.size > 0
+    ) {
+      return;
+    }
     const now = Date.now();
     if (now - lastUnreadFetchRef.current < UNREAD_REFRESH_THROTTLE_MS) return;
     lastUnreadFetchRef.current = now;
+    const stateGeneration = stateGenerationRef.current;
+    const requestGeneration = ++unreadCountRequestGenerationRef.current;
     fetchUnreadCount()
-      .then(commitUnreadCount)
-      // 일시 실패는 무시 — 다음 트리거(탭 전환 / 복귀 / push / modal)에서 정정.
+      .then((count) => {
+        if (
+          stateGenerationRef.current !== stateGeneration ||
+          unreadCountRequestGenerationRef.current !== requestGeneration ||
+          refreshingRef.current ||
+          markAllInFlightRef.current ||
+          readInFlightRef.current.size > 0
+        ) {
+          return;
+        }
+        commitUnreadCount(count);
+      })
+      // 일시 실패는 무시 — 다음 탭 전환 또는 전체 refresh에서 정정.
       .catch(() => {});
   }, [isAuthenticated, commitUnreadCount]);
 
@@ -200,17 +250,33 @@ export function NotificationProvider({
   const markRead = useCallback(
     async (id: NotificationId) => {
       const invocationGeneration = stateGenerationRef.current;
-      // 전체 읽음과 단건 읽음의 rollback이 서로를 덮어쓰지 않도록 먼저 시작된
-      // 전체 요청을 정착시킨다. 전체 요청이 실패해도 이어서 이 ID를 단건 처리한다.
-      const markAllInFlight = markAllInFlightRef.current;
-      if (markAllInFlight) await markAllInFlight;
-      if (stateGenerationRef.current !== invocationGeneration) return;
+      const initialInFlight = readInFlightRef.current.get(id);
+      if (initialInFlight) {
+        await initialInFlight;
+        return;
+      }
+
+      // 먼저 시작된 전체 refresh/전체 읽음을 정착시킨다. 대기 중 새 작업이
+      // 시작될 수 있으므로 둘 다 없을 때까지 확인한다.
+      while (true) {
+        const refreshInFlight = refreshingRef.current;
+        if (refreshInFlight) {
+          await refreshInFlight;
+          if (stateGenerationRef.current !== invocationGeneration) return;
+          continue;
+        }
+        const markAllInFlight = markAllInFlightRef.current;
+        if (markAllInFlight) {
+          await markAllInFlight;
+          if (stateGenerationRef.current !== invocationGeneration) return;
+          continue;
+        }
+        break;
+      }
 
       const inFlight = readInFlightRef.current.get(id);
       if (inFlight) {
-        // 최초 호출이 자기 rollback을 담당한다. 중복 탭은 같은 raw request를
-        // 기다리되 그 실패를 다시 전파해 unhandled rejection을 만들지 않는다.
-        await inFlight.catch(() => {});
+        await inFlight;
         return;
       }
 
@@ -220,6 +286,7 @@ export function NotificationProvider({
       const optimisticallyRead = target !== undefined;
       const stateGeneration = stateGenerationRef.current;
       let decrementedUnreadCount = false;
+      unreadCountRequestGenerationRef.current += 1;
 
       if (optimisticallyRead) {
         updateItems((current) =>
@@ -233,31 +300,36 @@ export function NotificationProvider({
         }
       }
 
-      const request = markNotificationRead(id);
-      readInFlightRef.current.set(id, request);
-      try {
-        await request;
-      } catch {
-        // 로그아웃으로 상태 세대가 바뀌었다면 이전 세션 snapshot을 복원하지 않는다.
-        if (
-          optimisticallyRead &&
-          stateGenerationRef.current === stateGeneration
-        ) {
-          let restored = false;
-          updateItems((current) => {
-            const currentTarget = current.find((item) => item.id === id);
-            if (!currentTarget?.isRead) return current;
-            restored = true;
-            return current.map((item) =>
-              item.id === id ? { ...item, isRead: false } : item,
-            );
-          });
-          if (restored && decrementedUnreadCount) {
-            commitUnreadCount(unreadCountRef.current + 1);
+      const operation = (async () => {
+        try {
+          await markNotificationRead(id);
+        } catch {
+          // 로그아웃으로 상태 세대가 바뀌었다면 이전 세션 snapshot을 복원하지 않는다.
+          if (
+            optimisticallyRead &&
+            stateGenerationRef.current === stateGeneration
+          ) {
+            let restored = false;
+            updateItems((current) => {
+              const currentTarget = current.find((item) => item.id === id);
+              if (!currentTarget?.isRead) return current;
+              restored = true;
+              return current.map((item) =>
+                item.id === id ? { ...item, isRead: false } : item,
+              );
+            });
+            if (restored && decrementedUnreadCount) {
+              commitUnreadCount(unreadCountRef.current + 1);
+            }
           }
         }
+      })();
+      readInFlightRef.current.set(id, operation);
+
+      try {
+        await operation;
       } finally {
-        if (readInFlightRef.current.get(id) === request) {
+        if (readInFlightRef.current.get(id) === operation) {
           readInFlightRef.current.delete(id);
         }
       }
@@ -272,13 +344,26 @@ export function NotificationProvider({
       return;
     }
 
-    const stateGeneration = stateGenerationRef.current;
+    const invocationGeneration = stateGenerationRef.current;
+    const refreshInFlight = refreshingRef.current;
+    if (refreshInFlight) await refreshInFlight;
+    if (stateGenerationRef.current !== invocationGeneration) return;
+
+    // refresh를 기다리는 동안 다른 전체 읽음이 시작됐을 수 있다.
+    const racedMarkAll = markAllInFlightRef.current;
+    if (racedMarkAll) {
+      await racedMarkAll;
+      return;
+    }
+
+    const stateGeneration = invocationGeneration;
     const operation = (async () => {
       // 먼저 시작된 단건 요청의 성공/rollback을 확정한 뒤 snapshot을 잡는다.
       // 이 promise를 ref에 공개하므로 이후 단건 요청은 전체 요청 뒤에 이어진다.
       await Promise.allSettled([...readInFlightRef.current.values()]);
       if (stateGenerationRef.current !== stateGeneration) return;
 
+      unreadCountRequestGenerationRef.current += 1;
       const snapshotItems = itemsRef.current;
       const snapshotUnreadCount = unreadCountRef.current;
       updateItems((current) =>
@@ -359,12 +444,15 @@ export function NotificationProvider({
   useEffect(() => {
     if (!isAuthenticated) {
       stateGenerationRef.current += 1;
+      unreadCountRequestGenerationRef.current += 1;
       commitItems([]);
       setNextCursor(null);
       setHasNext(true);
       commitUnreadCount(0);
+      setLoading(false);
       readInFlightRef.current.clear();
       markAllInFlightRef.current = null;
+      refreshingRef.current = null;
       initialFetchedRef.current = false;
       return;
     }
@@ -373,23 +461,20 @@ export function NotificationProvider({
     refresh();
   }, [isAuthenticated, refresh, commitItems, commitUnreadCount]);
 
-  // Background→active 복귀 시 배지만 가볍게 동기화 — 다른 앱 보다가 KeepEat
-  // 으로 돌아온 순간 종 옆 숫자가 곧장 맞도록. 목록(items)은 안 건드림
-  // (사용자가 알림창 열면 그때 refresh가 같이 끌어옴). active→active 같은
-  // 헛 발화는 prevAppState 비교로 제거하고, 로그아웃 상태면 호출 자체 스킵.
+  // Background/inactive→active 복귀 시 목록 첫 페이지와 unread count를 함께
+  // 동기화한다. 백그라운드에서 JS push listener가 놓친 이벤트의 fallback이며,
+  // 최초 mount가 이미 active인 경우는 prev 비교로 복귀로 오인하지 않는다.
   const prevAppStateRef = useRef<AppStateStatus>(AppState.currentState);
   useEffect(() => {
     const sub = AppState.addEventListener("change", (next) => {
       const prev = prevAppStateRef.current;
       prevAppStateRef.current = next;
-      // background→active 천이에서만. 천이 판정은 여기서, auth/throttle 가드는
-      // maybeRefreshUnreadCount 내부에서. 탭 전환과 같은 ref를 공유해 복귀+첫
-      // focus가 거의 동시여도 5초 내 1회만 실제 GET.
       if (next !== "active" || prev === "active") return;
-      maybeRefreshUnreadCount();
+      if (!isAuthenticated) return;
+      void refresh();
     });
     return () => sub.remove();
-  }, [maybeRefreshUnreadCount]);
+  }, [isAuthenticated, refresh]);
 
   // 알림함 카드, foreground dropdown, OS push response가 공유하는 유일한 탭
   // handler. 개별 읽음 실패는 내부에서 rollback하며 navigation을 막지 않는다.
@@ -416,7 +501,7 @@ export function NotificationProvider({
   useEffect(() => {
     if (!isAuthenticated) return;
     const sub = Notifications.addNotificationReceivedListener((notif) => {
-      refresh();
+      void refresh();
       const body = notif.request.content.body;
       if (!body) return;
       // 제목 줄로 쓸 푸시 title. 없으면 NotificationView가 "KeepEat" fallback.

@@ -98,17 +98,29 @@ export function mapDifficultyToBackend(difficulty?: string): string {
 // ─── API Functions ───────────────────────────────────────────────────────────
 
 /**
- * AI 레시피 생성 (POST /api/v1/recipes/generate)
- * 사용자의 냉장고 재료를 바탕으로 5개의 추천 레시피를 생성합니다.
- * 식재료/조미료가 부족할 경우 400 에러가 발생할 수 있습니다.
+ * AI 레시피 생성 작업 접수 (POST /api/v1/recipes/generate).
+ * 202 응답에는 결과나 job ID가 없으며, 결과는 사용자별 /result에서 조회한다.
  */
-export async function generateAiRecipes(): Promise<GeneratedRecipeDto[]> {
-  const { data } = await api.post<{ recipes: GeneratedRecipeDto[] }>(
-    "/api/v1/recipes/generate",
-    undefined,
-    { timeout: 120000 },
+export async function requestAiRecipeGeneration(): Promise<void> {
+  await api.post("/api/v1/recipes/generate");
+}
+
+interface GeneratedRecipeResultDto {
+  recipes: GeneratedRecipeDto[];
+}
+
+/**
+ * 현재 사용자의 AI 레시피 생성 결과 (GET /api/v1/recipes/result).
+ * 409는 아직 생성 중이며 호출자가 순차 polling한다.
+ */
+export async function getAiRecipeResult(
+  timeoutMs?: number,
+): Promise<GeneratedRecipeDto[]> {
+  const { data } = await api.get<GeneratedRecipeResultDto>(
+    "/api/v1/recipes/result",
+    timeoutMs === undefined ? undefined : { timeout: timeoutMs },
   );
-  return data.recipes || [];
+  return data.recipes ?? [];
 }
 
 /**

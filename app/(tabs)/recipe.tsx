@@ -76,8 +76,8 @@ const SORT_LABELS: Record<RecipeSortKey, string> = {
 export default function RecipeScreen() {
   const router = useRouter();
   const insets = useSafeAreaInsets();
-  const { showTopToast, showNotification } = useToast();
-  const { status, requestRecommendation, markSwiping, onComplete } =
+  const { showTopToast } = useToast();
+  const { status, requestRecommendation, markSwiping } =
     useRecipeRecommendation();
 
   const [recipes, setRecipes] = useState<MyRecipeListEntryDto[]>([]);
@@ -126,17 +126,6 @@ export default function RecipeScreen() {
       // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [hasLoadedOnce]),
   );
-
-  // In-app notification when AI recommendation completes (existing behavior).
-  useEffect(() => {
-    onComplete(() => {
-      showNotification("AI 셰프가 레시피를 완성했어요!", () => {
-        markSwiping();
-        router.push("/recipe-swipe" as never);
-      });
-    });
-    return () => onComplete(null);
-  }, [onComplete, showNotification, markSwiping, router]);
 
   const handleRefresh = async () => {
     setRefreshing(true);
