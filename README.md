@@ -166,6 +166,8 @@ AI 코딩 도구가 필요한 맥락만 참조할 수 있도록 `AGENTS.md`를 �
 | `context/` | 인증, 알림, 식재료 마스터, AI 추천 Context |
 | `services/` | API 클라이언트와 도메인별 서비스 래퍼 |
 
-## 브랜치 안내
+## 저장소 안내
 
-프론트엔드는 `front` 브랜치에서 개발 중인 진행 중 프로젝트입니다.
+이 저장소는 KeepEat의 React Native 프론트엔드 전용 저장소이며, 기본 개발 브랜치는 `main`입니다.
+
+백엔드는 [KeepEatSSU/KeepEat](https://github.com/KeepEatSSU/KeepEat)에서 관리합니다.
