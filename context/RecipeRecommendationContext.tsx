@@ -22,6 +22,10 @@ import { useToast } from "@/components/Toast";
 import { useAuth } from "@/context/AuthContext";
 import { parseNotificationPushData } from "@/utils/notificationRouting";
 import {
+  claimNotificationResponse,
+  loadInitialNotificationResponseOnce,
+} from "@/utils/notificationResponse";
+import {
   classifyRecipeResultHttpStatus,
   RecipeResultPoller,
   type RecipeResultErrorDisposition,
@@ -419,6 +423,7 @@ export function RecipeRecommendationProvider({
   // Foreground reception and a push tap share the same poller in-flight guard.
   useEffect(() => {
     if (!isAuthenticated) return;
+    let cancelled = false;
 
     const handlePushData = (data: unknown) => {
       if (parseNotificationPushData(data).type === "recipe_ready") {
@@ -429,11 +434,31 @@ export function RecipeRecommendationProvider({
       (notification) => handlePushData(notification.request.content.data),
     );
     const responseSub =
-      Notifications.addNotificationResponseReceivedListener((response) =>
-        handlePushData(response.notification.request.content.data),
-      );
+      Notifications.addNotificationResponseReceivedListener((response) => {
+        if (
+          claimNotificationResponse("recipe-result-recovery", response)
+        ) {
+          handlePushData(response.notification.request.content.data);
+        }
+      });
+
+    void loadInitialNotificationResponseOnce(
+      Notifications.getLastNotificationResponseAsync,
+    )
+      .then((response) => {
+        if (
+          cancelled ||
+          !response ||
+          !claimNotificationResponse("recipe-result-recovery", response)
+        ) {
+          return;
+        }
+        handlePushData(response.notification.request.content.data);
+      })
+      .catch(() => {});
 
     return () => {
+      cancelled = true;
       receivedSub.remove();
       responseSub.remove();
     };

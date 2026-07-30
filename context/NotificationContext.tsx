@@ -46,6 +46,10 @@ import {
   parseNotificationPushData,
   routeForNotificationType,
 } from "@/utils/notificationRouting";
+import {
+  claimNotificationResponse,
+  loadInitialNotificationResponseOnce,
+} from "@/utils/notificationResponse";
 
 // ─── Context ──────────────────────────────────────────────────────────────────
 
@@ -527,6 +531,9 @@ export function NotificationProvider({
     if (!isAuthenticated) return;
     const sub = Notifications.addNotificationResponseReceivedListener(
       (response) => {
+        if (!claimNotificationResponse("notification-routing", response)) {
+          return;
+        }
         const pushData = parseNotificationPushData(
           response.notification.request.content.data,
         );
@@ -542,17 +549,22 @@ export function NotificationProvider({
     return () => sub.remove();
   }, [isAuthenticated, handleNotificationPress]);
 
-  // Cold-start: if the app was launched by tapping a push, route once.
-  // A ref guards against the strict-mode double-mount re-firing the same
-  // navigation.
+  // Cold-start: both push consumers share one cached native response. The
+  // process-scoped claim prevents listener/initial-response races and Provider
+  // remounts from routing or reading the same notification twice.
   const coldStartedRef = useRef(false);
   useEffect(() => {
     if (!isAuthenticated || coldStartedRef.current) return;
     coldStartedRef.current = true;
     let cancelled = false;
-    Notifications.getLastNotificationResponseAsync()
+    loadInitialNotificationResponseOnce(
+      Notifications.getLastNotificationResponseAsync,
+    )
       .then((response) => {
         if (cancelled || !response) return;
+        if (!claimNotificationResponse("notification-routing", response)) {
+          return;
+        }
         const pushData = parseNotificationPushData(
           response.notification.request.content.data,
         );
@@ -566,7 +578,15 @@ export function NotificationProvider({
       })
       // 네이티브 API 실패 — unhandled rejection 방지용 silent catch.
       // 콜드 스타트 라우팅이 실패할 뿐 사용자 플로우엔 영향 없음.
-      .catch(() => {});
+      .catch(() => {})
+      // Expo keeps the last response until it is explicitly cleared. The
+      // cached promise still lets RecipeRecommendationProvider consume this
+      // launch response even if its effect runs after the native clear.
+      .finally(() => {
+        void Notifications.clearLastNotificationResponseAsync().catch(
+          () => {},
+        );
+      });
     return () => {
       cancelled = true;
     };
