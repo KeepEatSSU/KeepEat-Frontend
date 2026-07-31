@@ -285,9 +285,8 @@ export default function RecipeScreen() {
       return;
     }
     if (status !== "idle" && status !== "error") return;
-    // 안내/에러 토스트는 모두 context.requestRecommendation 안에서 결과
-    // 기반으로 띄움 (try 시작 시 안내, catch에서 에러로 교체). 타이밍 추측
-    // 없음 — Toast single-instance가 안내를 에러로 자동 dismiss + 교체.
+    // 안내/에러 피드백은 context.requestRecommendation 안에서 결과 기반으로
+    // enqueue한다. TopBanner queue가 연속 결과를 순서와 우선순위에 맞게 표시한다.
     requestRecommendation();
   };
 

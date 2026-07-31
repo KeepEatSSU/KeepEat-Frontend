@@ -519,6 +519,7 @@ export function NotificationProvider({
           ? () => handleNotificationPress(pushData)
           : undefined,
         title,
+        `push:${notif.request.identifier}`,
       );
     });
     return () => sub.remove();

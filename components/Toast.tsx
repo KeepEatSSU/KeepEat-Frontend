@@ -36,11 +36,21 @@ import {
   Feedback,
   FontSize,
   FontWeight,
-  Glass,
   Radius,
   Shadows,
   Spacing,
 } from "@/constants/theme";
+import {
+  createTopBannerPressGuard,
+  createTopBannerTimer,
+  EMPTY_TOP_BANNER_QUEUE,
+  isActionableNotification,
+  topBannerQueueReducer,
+  type TopBannerFeedbackItem,
+  type TopBannerFeedbackVariant,
+  type TopBannerItem,
+  type TopBannerNotificationItem,
+} from "@/components/topBannerQueue";
 import { Ionicons } from "@expo/vector-icons";
 import {
   type ComponentProps,
@@ -48,8 +58,8 @@ import {
   useCallback,
   useContext,
   useEffect,
+  useReducer,
   useRef,
-  useState,
 } from "react";
 import { Animated, Pressable, StyleSheet, Text, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
@@ -57,39 +67,26 @@ import { Portal } from "@gorhom/portal";
 
 // ─── Context ──────────────────────────────────────────────────────────────────
 
-export type FeedbackVariant = "success" | "error" | "info" | "warning";
-export type FeedbackPlacement = "top" | "bottom";
-
-export interface FeedbackAction {
-  label: string;
-  onPress: () => void;
-}
+export type FeedbackVariant = TopBannerFeedbackVariant;
 
 export interface FeedbackOptions {
   message: string;
   variant?: FeedbackVariant;
-  placement?: FeedbackPlacement;
-  action?: FeedbackAction;
+  dedupeKey?: string;
 }
 
-type ToastInput = string | FeedbackOptions;
-
 interface ToastContextValue {
-  showToast: (input: ToastInput) => void;
   showTopToast: (options: FeedbackOptions) => void;
-  /** Reserved for future action snackbars. Non-action calls follow TopToast policy. */
-  showSnackbar: (options: FeedbackOptions) => void;
   showNotification: (
     message: string,
     onTap?: () => void,
     title?: string,
+    dedupeKey?: string,
   ) => void;
 }
 
 const ToastContext = createContext<ToastContextValue>({
-  showToast: () => {},
   showTopToast: () => {},
-  showSnackbar: () => {},
   showNotification: () => {},
 });
 
@@ -102,24 +99,6 @@ const ANIM_OUT = 250;
 const FEEDBACK_Z_INDEX = 100000;
 const NOTIFICATION_Z_INDEX = 100001;
 
-interface FeedbackData {
-  type: "feedback";
-  message: string;
-  placement: FeedbackPlacement;
-  variant: FeedbackVariant;
-  action?: FeedbackAction;
-}
-
-interface NotificationData {
-  type: "notification";
-  message: string;
-  onTap?: () => void;
-  /** 드롭다운(notification) 제목 줄. 없으면 "KeepEat"로 fallback. */
-  title?: string;
-}
-
-type ToastData = FeedbackData | NotificationData;
-
 const FEEDBACK_ICONS: Record<
   FeedbackVariant,
   ComponentProps<typeof Ionicons>["name"]
@@ -130,206 +109,156 @@ const FEEDBACK_ICONS: Record<
   warning: "warning",
 };
 
-function normalizeFeedback(
-  input: ToastInput,
-  fallbackPlacement: FeedbackPlacement,
-): FeedbackData {
-  if (typeof input === "string") {
-    return {
-      type: "feedback",
-      message: input,
-      placement: fallbackPlacement,
-      variant: fallbackPlacement === "top" ? "info" : "success",
-    };
-  }
-
-  const placement = input.placement ?? fallbackPlacement;
-  return {
-    type: "feedback",
-    message: input.message,
-    placement,
-    variant: input.variant ?? (placement === "top" ? "info" : "success"),
-    action: input.action,
-  };
-}
-
-function getInitialOffset(data: ToastData) {
-  if (data.type === "notification") return -40;
-  return data.placement === "top" ? -40 : 40;
-}
-
-function getDuration(data: ToastData) {
-  if (data.type === "notification") return Feedback.durationMs.notification;
-  return data.placement === "top"
-    ? Feedback.durationMs.top
-    : Feedback.durationMs.bottom;
-}
-
 export function ToastProvider({ children }: { children: React.ReactNode }) {
-  const [data, setData] = useState<ToastData | null>(null);
-  const [visible, setVisible] = useState(false);
+  const [queueState, dispatch] = useReducer(
+    topBannerQueueReducer,
+    EMPTY_TOP_BANNER_QUEUE,
+  );
+  const current = queueState.current;
 
   const opacity = useRef(new Animated.Value(0)).current;
   const translateY = useRef(new Animated.Value(0)).current;
-  const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const dataRef = useRef<ToastData | null>(null);
-  const visibleRef = useRef(false);
-  const queuedTopToastRef = useRef<FeedbackData | null>(null);
-  const showRef = useRef<(next: ToastData) => void>(() => {});
+  const timer = useRef(createTopBannerTimer()).current;
+  const animationRef = useRef<Animated.CompositeAnimation | null>(null);
+  const currentItemRef = useRef<TopBannerItem | null>(current);
+  const currentIdRef = useRef<string | null>(current?.id ?? null);
+  const pressGuard = useRef(createTopBannerPressGuard()).current;
+  const nextIdRef = useRef(0);
 
-  const hide = useCallback(() => {
-    if (timerRef.current) {
-      clearTimeout(timerRef.current);
-      timerRef.current = null;
-    }
-    const closingData = dataRef.current;
-    Animated.parallel([
-      Animated.timing(opacity, {
-        toValue: 0,
-        duration: ANIM_OUT,
-        useNativeDriver: true,
-      }),
-      Animated.timing(translateY, {
-        toValue: closingData ? getInitialOffset(closingData) : 40,
-        duration: ANIM_OUT,
-        useNativeDriver: true,
-      }),
-    ]).start(() => {
-      setVisible(false);
-      setData(null);
-      dataRef.current = null;
-      visibleRef.current = false;
+  currentItemRef.current = current;
+  currentIdRef.current = current?.id ?? null;
 
-      if (closingData?.type === "notification" && queuedTopToastRef.current) {
-        const queued = queuedTopToastRef.current;
-        queuedTopToastRef.current = null;
-        setTimeout(() => showRef.current(queued), 0);
-      }
-    });
-  }, [opacity, translateY]);
+  const dismiss = useCallback(
+    (id: string) => {
+      if (currentIdRef.current !== id) return;
 
-  const show = useCallback(
-    (d: ToastData) => {
-      if (timerRef.current) clearTimeout(timerRef.current);
-
-      dataRef.current = d;
-      visibleRef.current = true;
-      setData(d);
-      setVisible(true);
-
-      opacity.setValue(0);
-      translateY.setValue(getInitialOffset(d));
-
-      Animated.parallel([
+      timer.clear();
+      animationRef.current?.stop();
+      const closing = Animated.parallel([
         Animated.timing(opacity, {
-          toValue: 1,
-          duration: ANIM_IN,
+          toValue: 0,
+          duration: ANIM_OUT,
           useNativeDriver: true,
         }),
         Animated.timing(translateY, {
-          toValue: 0,
-          duration: ANIM_IN,
+          toValue: -40,
+          duration: ANIM_OUT,
           useNativeDriver: true,
         }),
-      ]).start();
-
-      timerRef.current = setTimeout(hide, getDuration(d));
+      ]);
+      animationRef.current = closing;
+      closing.start(({ finished }) => {
+        if (!finished || currentIdRef.current !== id) return;
+        animationRef.current = null;
+        dispatch({ type: "dismiss", id });
+      });
     },
-    [opacity, translateY, hide],
+    [opacity, timer, translateY],
   );
 
+  const currentId = current?.id ?? null;
   useEffect(() => {
-    showRef.current = show;
-  }, [show]);
+    pressGuard.setCurrent(currentId);
+    timer.clear();
+    animationRef.current?.stop();
 
-  const showFeedback = useCallback(
-    (feedback: FeedbackData) => {
-      if (
-        feedback.placement === "top" &&
-        visibleRef.current &&
-        dataRef.current?.type === "notification"
-      ) {
-        queuedTopToastRef.current = feedback;
-        return;
+    const item = currentItemRef.current;
+    if (!item || item.id !== currentId) return;
+
+    opacity.setValue(0);
+    translateY.setValue(-40);
+    const opening = Animated.parallel([
+      Animated.timing(opacity, {
+        toValue: 1,
+        duration: ANIM_IN,
+        useNativeDriver: true,
+      }),
+      Animated.timing(translateY, {
+        toValue: 0,
+        duration: ANIM_IN,
+        useNativeDriver: true,
+      }),
+    ]);
+    animationRef.current = opening;
+    opening.start(({ finished }) => {
+      if (finished && currentIdRef.current === currentId) {
+        animationRef.current = null;
       }
-      show(feedback);
-    },
-    [show],
-  );
+    });
+    timer.schedule(() => dismiss(item.id), item.durationMs);
 
-  // Backward-compatible API. General non-blocking feedback now follows the
-  // TopToast policy, even when older callers still use the legacy helper.
-  const showToast = useCallback(
-    (input: ToastInput) => showFeedback(normalizeFeedback(input, "top")),
-    [showFeedback],
-  );
+    return () => {
+      timer.clear();
+      animationRef.current?.stop();
+      animationRef.current = null;
+    };
+  }, [currentId, dismiss, opacity, pressGuard, timer, translateY]);
+
+  const nextId = useCallback(() => {
+    nextIdRef.current += 1;
+    return `top-banner-${nextIdRef.current}`;
+  }, []);
 
   const showTopToast = useCallback(
-    (options: FeedbackOptions) =>
-      showFeedback(normalizeFeedback(options, "top")),
-    [showFeedback],
-  );
-
-  // Reserved for future action snackbars (Undo / retry / view). Plain
-  // information without an action is intentionally routed to TopToast.
-  const showSnackbar = useCallback(
     (options: FeedbackOptions) => {
-      const placement: FeedbackPlacement = options.action ? "bottom" : "top";
-      showFeedback(normalizeFeedback({ ...options, placement }, placement));
+      const item: TopBannerFeedbackItem = {
+        id: nextId(),
+        kind: "feedback",
+        message: options.message,
+        variant: options.variant ?? "info",
+        dedupeKey: options.dedupeKey,
+        durationMs: Feedback.durationMs.top,
+      };
+      dispatch({ type: "enqueue", item });
     },
-    [showFeedback],
+    [nextId],
   );
 
   const showNotification = useCallback(
-    (message: string, onTap?: () => void, title?: string) =>
-      show({ message, type: "notification", onTap, title }),
-    [show],
+    (
+      message: string,
+      onTap?: () => void,
+      title?: string,
+      dedupeKey?: string,
+    ) => {
+      const item: TopBannerNotificationItem = {
+        id: nextId(),
+        kind: "notification",
+        message,
+        title,
+        onPress: onTap,
+        dedupeKey,
+        durationMs: Feedback.durationMs.notification,
+      };
+      dispatch({ type: "enqueue", item });
+    },
+    [nextId],
   );
 
-  useEffect(() => {
-    return () => {
-      if (timerRef.current) clearTimeout(timerRef.current);
-    };
-  }, []);
+  const handleNotificationPress = useCallback(
+    (item: TopBannerNotificationItem & { onPress: () => void }) => {
+      if (!pressGuard.claim(item.id)) return;
+      dismiss(item.id);
+      item.onPress();
+    },
+    [dismiss, pressGuard],
+  );
 
-  // Rendering both views inside <Portal> so they mount at the root
-  // <PortalProvider> (outside the Stack) — sidesteps the iOS native
-  // fullScreenModal presentation boundary that hides sibling-of-Stack views,
-  // and anchors positioning to the app root (fixes Android off-center render).
-  const showNotif = visible && data?.type === "notification";
-  const showFeedbackSurface = visible && data?.type === "feedback";
+  // The single host mounts at the root PortalProvider, preserving the existing
+  // safe-area positioning while ensuring feedback and notifications cannot
+  // render simultaneously.
 
   return (
-    <ToastContext.Provider
-      value={{ showToast, showTopToast, showSnackbar, showNotification }}
-    >
+    <ToastContext.Provider value={{ showTopToast, showNotification }}>
       {children}
 
       <Portal>
-        {showNotif && data && (
-          <NotificationView
-            message={data.message}
-            title={data.title}
+        {current && (
+          <TopBannerHost
+            item={current}
             opacity={opacity}
             translateY={translateY}
-            onTap={() => {
-              hide();
-              data.onTap?.();
-            }}
-          />
-        )}
-      </Portal>
-
-      <Portal>
-        {showFeedbackSurface && data && data.type === "feedback" && (
-          <FeedbackView
-            message={data.message}
-            placement={data.placement}
-            variant={data.variant}
-            action={data.action}
-            opacity={opacity}
-            translateY={translateY}
-            onDismiss={hide}
+            onNotificationPress={handleNotificationPress}
           />
         )}
       </Portal>
@@ -337,104 +266,99 @@ export function ToastProvider({ children }: { children: React.ReactNode }) {
   );
 }
 
-// ─── Feedback Views ───────────────────────────────────────────────────────────
+// ─── Top Banner Host ──────────────────────────────────────────────────────────
+
+function TopBannerHost({
+  item,
+  opacity,
+  translateY,
+  onNotificationPress,
+}: {
+  item: TopBannerItem;
+  opacity: Animated.Value;
+  translateY: Animated.Value;
+  onNotificationPress: (
+    item: TopBannerNotificationItem & { onPress: () => void },
+  ) => void;
+}) {
+  if (item.kind === "notification") {
+    return (
+      <NotificationView
+        message={item.message}
+        title={item.title}
+        opacity={opacity}
+        translateY={translateY}
+        onTap={
+          isActionableNotification(item)
+            ? () => onNotificationPress(item)
+            : undefined
+        }
+      />
+    );
+  }
+
+  return (
+    <FeedbackView
+      message={item.message}
+      variant={item.variant}
+      opacity={opacity}
+      translateY={translateY}
+    />
+  );
+}
+
+// ─── Feedback View ────────────────────────────────────────────────────────────
 
 function FeedbackView({
   message,
-  placement,
   variant,
-  action,
   opacity,
   translateY,
-  onDismiss,
 }: {
   message: string;
-  placement: FeedbackPlacement;
   variant: FeedbackVariant;
-  action?: FeedbackAction;
   opacity: Animated.Value;
   translateY: Animated.Value;
-  onDismiss: () => void;
 }) {
   const insets = useSafeAreaInsets();
-  const isTop = placement === "top";
   const tokens = Feedback.variants[variant];
-  const bottomOffset =
-    Math.max(insets.bottom, Glass.bottomBarPaddingBottomMin) +
-    Glass.bottomBarActionHeight +
-    Glass.bottomBarContentPaddingTop +
-    Feedback.bottomBarGap;
-
-  const handleActionPress = () => {
-    onDismiss();
-    action?.onPress();
-  };
 
   return (
     <View
       style={[
-        isTop ? styles.topFeedbackContainer : styles.bottomFeedbackContainer,
-        isTop
-          ? { top: Math.max(insets.top, 16) + Feedback.topOffsetGap }
-          : { bottom: bottomOffset },
+        styles.topFeedbackContainer,
+        { top: Math.max(insets.top, 16) + Feedback.topOffsetGap },
       ]}
-      pointerEvents={action ? "box-none" : "none"}
+      pointerEvents="none"
     >
       <Animated.View
         style={[
-          isTop ? styles.topFeedbackCard : styles.snackbar,
-          isTop
-            ? {
-                backgroundColor: tokens.softBackground,
-                borderColor: tokens.borderColor,
-              }
-            : { backgroundColor: tokens.solidBackground },
+          styles.topFeedbackCard,
+          {
+            backgroundColor: tokens.softBackground,
+            borderColor: tokens.borderColor,
+          },
           { opacity, transform: [{ translateY }] },
         ]}
       >
         <View
           style={[
             styles.feedbackIconWrap,
-            {
-              backgroundColor: isTop
-                ? tokens.iconBackground
-                : "rgba(255, 255, 255, 0.18)",
-            },
+            { backgroundColor: tokens.iconBackground },
           ]}
         >
           <Ionicons
             name={FEEDBACK_ICONS[variant]}
             size={18}
-            color={isTop ? tokens.softForeground : tokens.foreground}
+            color={tokens.softForeground}
           />
         </View>
         <Text
-          style={[
-            isTop ? styles.topFeedbackText : styles.snackbarText,
-            { color: isTop ? tokens.softForeground : tokens.foreground },
-          ]}
+          style={[styles.topFeedbackText, { color: tokens.softForeground }]}
           numberOfLines={2}
         >
           {message}
         </Text>
-        {action && (
-          <Pressable
-            onPress={handleActionPress}
-            style={({ pressed }) => [
-              styles.snackbarAction,
-              pressed && { opacity: 0.65 },
-            ]}
-          >
-            <Text
-              style={[
-                styles.snackbarActionText,
-                { color: isTop ? tokens.softForeground : tokens.foreground },
-              ]}
-            >
-              {action.label}
-            </Text>
-          </Pressable>
-        )}
       </Animated.View>
     </View>
   );
@@ -454,9 +378,22 @@ function NotificationView({
   title?: string;
   opacity: Animated.Value;
   translateY: Animated.Value;
-  onTap: () => void;
+  onTap?: () => void;
 }) {
   const insets = useSafeAreaInsets();
+  const content = (
+    <>
+      <View style={styles.notifIconWrap}>
+        <Ionicons name="restaurant" size={18} color={Colors.primary} />
+      </View>
+      <View style={styles.notifTextWrap}>
+        <Text style={styles.notifTitle}>{title ?? "KeepEat"}</Text>
+        <Text style={styles.notifBody} numberOfLines={2}>
+          {message}
+        </Text>
+      </View>
+    </>
+  );
 
   return (
     <View
@@ -464,22 +401,18 @@ function NotificationView({
         styles.notifContainer,
         { top: Math.max(insets.top, 16) + Feedback.topOffsetGap },
       ]}
-      pointerEvents="box-none"
+      pointerEvents={onTap ? "box-none" : "none"}
     >
       <Animated.View
         style={[styles.notifCard, { opacity, transform: [{ translateY }] }]}
       >
-        <Pressable onPress={onTap} style={styles.notifPressable}>
-          <View style={styles.notifIconWrap}>
-            <Ionicons name="restaurant" size={18} color={Colors.primary} />
-          </View>
-          <View style={styles.notifTextWrap}>
-            <Text style={styles.notifTitle}>{title ?? "KeepEat"}</Text>
-            <Text style={styles.notifBody} numberOfLines={2}>
-              {message}
-            </Text>
-          </View>
-        </Pressable>
+        {onTap ? (
+          <Pressable onPress={onTap} style={styles.notifContent}>
+            {content}
+          </Pressable>
+        ) : (
+          <View style={styles.notifContent}>{content}</View>
+        )}
       </Animated.View>
     </View>
   );
@@ -497,14 +430,6 @@ const styles = StyleSheet.create({
     zIndex: FEEDBACK_Z_INDEX,
     elevation: FEEDBACK_Z_INDEX,
   },
-  bottomFeedbackContainer: {
-    position: "absolute",
-    left: 0,
-    right: 0,
-    alignItems: "center",
-    zIndex: FEEDBACK_Z_INDEX,
-    elevation: FEEDBACK_Z_INDEX,
-  },
   topFeedbackCard: {
     width: "100%",
     maxWidth: Feedback.maxWidth,
@@ -516,18 +441,6 @@ const styles = StyleSheet.create({
     paddingVertical: Spacing.md,
     borderRadius: Radius.xl,
     ...Shadows.ambient,
-  },
-  snackbar: {
-    maxWidth: Feedback.maxWidth,
-    minHeight: 52,
-    flexDirection: "row",
-    alignItems: "center",
-    gap: Spacing.sm,
-    paddingHorizontal: Spacing.base,
-    paddingVertical: Spacing.md,
-    borderRadius: Radius.xl,
-    marginHorizontal: Spacing.lg,
-    ...Shadows.fab,
   },
   feedbackIconWrap: {
     width: 28,
@@ -543,22 +456,6 @@ const styles = StyleSheet.create({
     lineHeight: 18,
     fontWeight: FontWeight.semiBold,
   },
-  snackbarText: {
-    flex: 1,
-    flexShrink: 1,
-    fontSize: FontSize.bodyMd,
-    lineHeight: 20,
-    fontWeight: FontWeight.semiBold,
-  },
-  snackbarAction: {
-    paddingHorizontal: Spacing.sm,
-    paddingVertical: Spacing.xs,
-    borderRadius: Radius.full,
-  },
-  snackbarActionText: {
-    fontSize: FontSize.bodySm,
-    fontWeight: FontWeight.bold,
-  },
 
   // Top notification
   notifContainer: {
@@ -573,7 +470,7 @@ const styles = StyleSheet.create({
     borderRadius: Radius.xl,
     ...Shadows.ambient,
   },
-  notifPressable: {
+  notifContent: {
     flexDirection: "row",
     alignItems: "center",
     padding: Spacing.base,
