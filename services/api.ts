@@ -17,6 +17,10 @@
  */
 
 import { API_BASE_URL, API_TIMEOUT_MS, AUTH_ENDPOINTS } from "@/constants/config";
+import {
+  createAuthRefreshCoordinator,
+  type AuthTokens,
+} from "@/services/authSession";
 import { tokenStorage } from "@/services/tokenStorage";
 import axios, {
   AxiosError,
@@ -66,8 +70,11 @@ export const authEvents = {
 
 const SENSITIVE_BODY_KEYS = new Set([
   "password",
-  "newPassword",
-  "currentPassword",
+  "newpassword",
+  "currentpassword",
+  "accesstoken",
+  "refreshtoken",
+  "token",
 ]);
 
 function maskBody(body: unknown): unknown {
@@ -80,7 +87,7 @@ function maskBody(body: unknown): unknown {
   if (Array.isArray(body)) return body.map(maskBody);
   const out: Record<string, unknown> = {};
   for (const [k, v] of Object.entries(body as Record<string, unknown>)) {
-    out[k] = SENSITIVE_BODY_KEYS.has(k) ? "***" : maskBody(v);
+    out[k] = SENSITIVE_BODY_KEYS.has(k.toLowerCase()) ? "***" : maskBody(v);
   }
   return out;
 }
@@ -123,7 +130,10 @@ function logRequest(config: InternalAxiosRequestConfig): void {
 function logResponse(response: AxiosResponse): void {
   if (!__DEV__) return;
   const path = pathOf(response.config);
-  console.log(`[API RES] ${response.status} ${path}`, parseBody(response.data));
+  console.log(
+    `[API RES] ${response.status} ${path}`,
+    maskBody(parseBody(response.data)),
+  );
 }
 
 function logError(error: AxiosError): void {
@@ -131,11 +141,11 @@ function logError(error: AxiosError): void {
   const path = pathOf(error.config);
   const method = (error.config?.method ?? "GET").toUpperCase();
   if (error.response) {
-    // Server replied with a status (4xx/5xx) — surface its body verbatim so
-    // backend error envelopes like { code, message, status } are visible.
+    // Server replied with a status (4xx/5xx). Keep its structured error
+    // envelope visible while masking credentials and other sensitive fields.
     console.log(
       `[API ERR] ${error.response.status} ${method} ${path}`,
-      parseBody(error.response.data),
+      maskBody(parseBody(error.response.data)),
     );
   } else {
     // No response reached us. The body the user sees in Swagger isn't here
@@ -187,24 +197,48 @@ api.interceptors.request.use(async (config: InternalAxiosRequestConfig) => {
 
 type RetriableConfig = InternalAxiosRequestConfig & { _retry?: boolean };
 
-// Single in-flight refresh shared across concurrent 401s.
-let refreshPromise: Promise<string> | null = null;
+const REFRESH_EXCLUDED_PATHS = new Set<string>([
+  AUTH_ENDPOINTS.login,
+  AUTH_ENDPOINTS.signup,
+  AUTH_ENDPOINTS.refresh,
+  AUTH_ENDPOINTS.logout,
+  AUTH_ENDPOINTS.emailSend,
+  AUTH_ENDPOINTS.emailVerify,
+]);
 
-async function refreshAccessToken(): Promise<string> {
-  const refreshToken = await tokenStorage.getRefreshToken();
-  if (!refreshToken) {
-    throw new Error("No refresh token available");
+const REFRESH_EXCLUDED_PREFIXES = [
+  "/api/users/password/",
+  "/oauth2/",
+  "/login/oauth2/",
+];
+
+function requestPath(url: string | undefined): string {
+  if (!url) return "";
+
+  let path = url.startsWith(API_BASE_URL)
+    ? url.slice(API_BASE_URL.length)
+    : url;
+  const suffixIndex = path.search(/[?#]/);
+  if (suffixIndex >= 0) {
+    path = path.slice(0, suffixIndex);
   }
+  return path.startsWith("/") ? path : `/${path}`;
+}
 
+function isRefreshExcluded(url: string | undefined): boolean {
+  const path = requestPath(url);
+  return (
+    REFRESH_EXCLUDED_PATHS.has(path) ||
+    REFRESH_EXCLUDED_PREFIXES.some((prefix) => path.startsWith(prefix))
+  );
+}
+
+async function requestRefreshTokens(refreshToken: string): Promise<unknown> {
   if (__DEV__) console.log("[API REFRESH] attempting refresh...");
-  // Bare axios bypasses our interceptors, so log this leg manually.
   if (__DEV__) console.log(`[API REQ] POST ${AUTH_ENDPOINTS.refresh}`);
 
   try {
-    const { data } = await axios.post<{
-      accessToken: string;
-      refreshToken: string;
-    }>(
+    const { data, status } = await axios.post<unknown>(
       `${API_BASE_URL}${AUTH_ENDPOINTS.refresh}`,
       { refreshToken },
       {
@@ -213,12 +247,10 @@ async function refreshAccessToken(): Promise<string> {
       },
     );
 
-    if (__DEV__) console.log(`[API RES] 200 ${AUTH_ENDPOINTS.refresh}`);
-    await tokenStorage.setTokens(data.accessToken, data.refreshToken);
     if (__DEV__) {
-      console.log("[API REFRESH] success, retrying original request");
+      console.log(`[API RES] ${status} ${AUTH_ENDPOINTS.refresh}`);
     }
-    return data.accessToken;
+    return data;
   } catch (e) {
     if (__DEV__) {
       const status = (e as AxiosError).response?.status ?? "NETWORK";
@@ -227,6 +259,24 @@ async function refreshAccessToken(): Promise<string> {
     throw e;
   }
 }
+
+const refreshCoordinator = createAuthRefreshCoordinator({
+  getRefreshToken: tokenStorage.getRefreshToken,
+  requestRefresh: requestRefreshTokens,
+  saveAuthTokens: async ({ accessToken, refreshToken }) => {
+    await tokenStorage.setTokens(accessToken, refreshToken);
+    if (__DEV__) {
+      console.log("[API REFRESH] success, retrying original request");
+    }
+  },
+  expireSession: async () => {
+    try {
+      await tokenStorage.clearTokens();
+    } finally {
+      authEvents.emitLogout();
+    }
+  },
+});
 
 api.interceptors.response.use(
   (response) => {
@@ -244,8 +294,7 @@ api.interceptors.response.use(
       status !== 401 ||
       !original ||
       original._retry ||
-      original.url?.includes(AUTH_ENDPOINTS.refresh) ||
-      original.url?.includes(AUTH_ENDPOINTS.login)
+      isRefreshExcluded(original.url)
     ) {
       return Promise.reject(error);
     }
@@ -253,22 +302,16 @@ api.interceptors.response.use(
     original._retry = true;
 
     try {
-      // De-dupe: first 401 starts the refresh, the rest await the same promise.
-      if (!refreshPromise) {
-        refreshPromise = refreshAccessToken().finally(() => {
-          refreshPromise = null;
-        });
-      }
-      const newAccessToken = await refreshPromise;
+      return await refreshCoordinator.retryAfterRefresh(
+        async (newAccessToken) => {
+          const headers = AxiosHeaders.from(original.headers);
+          headers.set("Authorization", `Bearer ${newAccessToken}`);
+          original.headers = headers;
 
-      const headers = AxiosHeaders.from(original.headers);
-      headers.set("Authorization", `Bearer ${newAccessToken}`);
-      original.headers = headers;
-
-      return api.request(original);
+          return api.request(original);
+        },
+      );
     } catch (refreshError) {
-      await tokenStorage.clearTokens();
-      authEvents.emitLogout();
       return Promise.reject(refreshError);
     }
   },
@@ -276,10 +319,7 @@ api.interceptors.response.use(
 
 // ─── Convenience helpers (typed) ─────────────────────────────────────────────
 
-export type LoginResponse = {
-  accessToken: string;
-  refreshToken: string;
-};
+export type LoginResponse = AuthTokens;
 
 export type UserInfo = {
   id: number | string;
@@ -380,7 +420,7 @@ export async function signUp(
   config?: AxiosRequestConfig,
 ): Promise<void> {
   await api.post(
-    "/api/users/signup",
+    AUTH_ENDPOINTS.signup,
     { nickname, email, password },
     config,
   );
@@ -461,4 +501,3 @@ export async function logout(): Promise<void> {
   await tokenStorage.clearTokens();
   authEvents.emitLogout();
 }
-

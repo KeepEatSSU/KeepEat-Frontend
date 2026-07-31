@@ -10,15 +10,28 @@
  */
 
 import * as SecureStore from "expo-secure-store";
+import {
+  clearPersistedAuthTokens,
+  savePersistedAuthTokens,
+  type AuthTokenPersistence,
+} from "@/services/authSession";
 
 const ACCESS_KEY = "keepeat.accessToken";
 const REFRESH_KEY = "keepeat.refreshToken";
 
+const secureTokenPersistence: AuthTokenPersistence = {
+  setAccessToken: (token) => SecureStore.setItemAsync(ACCESS_KEY, token),
+  setRefreshToken: (token) => SecureStore.setItemAsync(REFRESH_KEY, token),
+  deleteAccessToken: () => SecureStore.deleteItemAsync(ACCESS_KEY),
+  deleteRefreshToken: () => SecureStore.deleteItemAsync(REFRESH_KEY),
+};
+
 async function setTokens(accessToken: string, refreshToken: string): Promise<void> {
-  await Promise.all([
-    SecureStore.setItemAsync(ACCESS_KEY, accessToken),
-    SecureStore.setItemAsync(REFRESH_KEY, refreshToken),
-  ]);
+  await savePersistedAuthTokens(
+    secureTokenPersistence,
+    accessToken,
+    refreshToken,
+  );
 }
 
 async function getAccessToken(): Promise<string | null> {
@@ -30,10 +43,7 @@ async function getRefreshToken(): Promise<string | null> {
 }
 
 async function clearTokens(): Promise<void> {
-  await Promise.all([
-    SecureStore.deleteItemAsync(ACCESS_KEY),
-    SecureStore.deleteItemAsync(REFRESH_KEY),
-  ]);
+  await clearPersistedAuthTokens(secureTokenPersistence);
 }
 
 export const tokenStorage = {
