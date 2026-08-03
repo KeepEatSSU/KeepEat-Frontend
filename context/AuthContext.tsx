@@ -49,7 +49,7 @@ type AuthContextValue = {
   login: (email: string, password: string) => Promise<void>;
   signUp: (email: string, password: string, nickname: string) => Promise<void>;
   /**
-   * 외부 OAuth(예: 구글)에서 이미 받은 accessToken/refreshToken을 그대로 태움.
+   * OAuth code 교환 등에서 받은 accessToken/refreshToken으로 로그인 완료.
    * 일반 login()의 토큰 획득 이후 단계(setTokens → /me → setUser)와 동일.
    */
   loginWithTokens: (accessToken: string, refreshToken: string) => Promise<void>;
@@ -154,7 +154,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         setUser(MOCK_USER);
         return;
       }
-      // Tokens already obtained externally (e.g. Google OAuth redirect).
+      // Tokens already obtained externally (e.g. Google OAuth code exchange).
       // Mirror the post-login flow of `login()`: persist → fetch /me → setUser.
       await tokenStorage.setTokens(accessToken, refreshToken);
       const me = await getMyInfo();

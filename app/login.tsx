@@ -35,6 +35,7 @@ export default function LoginScreen() {
   const router = useRouter();
   const insets = useSafeAreaInsets();
   const passwordRef = useRef<TextInput>(null);
+  const googleSubmittingRef = useRef(false);
   const { login, loginWithTokens } = useAuth();
   const { showTopToast } = useToast();
 
@@ -95,26 +96,25 @@ export default function LoginScreen() {
   const canSubmit = email.length > 0 && password.length > 0 && !submitting;
 
   const handleGoogleLogin = async () => {
-    if (googleSubmitting) return;
+    if (googleSubmittingRef.current) return;
+    googleSubmittingRef.current = true;
     setGoogleSubmitting(true);
     setError("");
     try {
       const tokens = await startGoogleLogin();
       if (!tokens) {
-        // Cancel / dismiss / missing tokens — silent. Avoid leaking why.
+        // User cancellation or a duplicate callback needs no additional UI.
         return;
       }
       await loginWithTokens(tokens.accessToken, tokens.refreshToken);
       router.replace("/(tabs)");
-    } catch (e) {
+    } catch {
       showTopToast({
-        message: getErrorMessage(
-          e,
-          "구글 로그인에 실패했어요. 잠시 후 다시 시도해주세요",
-        ),
+        message: "Google 로그인 정보가 만료되었어요. 다시 로그인해 주세요.",
         variant: "error",
       });
     } finally {
+      googleSubmittingRef.current = false;
       setGoogleSubmitting(false);
     }
   };

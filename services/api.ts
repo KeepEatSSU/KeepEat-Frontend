@@ -19,6 +19,7 @@
 import { API_BASE_URL, API_TIMEOUT_MS, AUTH_ENDPOINTS } from "@/constants/config";
 import {
   createAuthRefreshCoordinator,
+  parseAuthTokens,
   type AuthTokens,
 } from "@/services/authSession";
 import { tokenStorage } from "@/services/tokenStorage";
@@ -76,18 +77,29 @@ const SENSITIVE_BODY_KEYS = new Set([
   "refreshtoken",
   "token",
 ]);
+const SENSITIVE_REQUEST_BODY_KEYS = new Set([
+  ...SENSITIVE_BODY_KEYS,
+  "code",
+]);
 
-function maskBody(body: unknown): unknown {
+function maskBody(
+  body: unknown,
+  sensitiveKeys = SENSITIVE_BODY_KEYS,
+): unknown {
   if (body == null || typeof body !== "object") return body;
   // FormData (multipart uploads) — don't dump binary parts to the console,
   // and don't traverse the internal _parts shape across RN versions.
   if (typeof FormData !== "undefined" && body instanceof FormData) {
     return "[FormData]";
   }
-  if (Array.isArray(body)) return body.map(maskBody);
+  if (Array.isArray(body)) {
+    return body.map((item) => maskBody(item, sensitiveKeys));
+  }
   const out: Record<string, unknown> = {};
   for (const [k, v] of Object.entries(body as Record<string, unknown>)) {
-    out[k] = SENSITIVE_BODY_KEYS.has(k.toLowerCase()) ? "***" : maskBody(v);
+    out[k] = sensitiveKeys.has(k.toLowerCase())
+      ? "***"
+      : maskBody(v, sensitiveKeys);
   }
   return out;
 }
@@ -119,7 +131,9 @@ function logRequest(config: InternalAxiosRequestConfig): void {
   const path = pathOf(config);
   const isRetry = (config as RetriableConfig)._retry ? " (retry)" : "";
   const body =
-    config.data !== undefined ? maskBody(parseBody(config.data)) : undefined;
+    config.data !== undefined
+      ? maskBody(parseBody(config.data), SENSITIVE_REQUEST_BODY_KEYS)
+      : undefined;
   if (body !== undefined) {
     console.log(`[API REQ] ${method} ${path}${isRetry}`, body);
   } else {
@@ -200,6 +214,7 @@ const REFRESH_EXCLUDED_PATHS = new Set<string>([
   AUTH_ENDPOINTS.login,
   AUTH_ENDPOINTS.signup,
   AUTH_ENDPOINTS.refresh,
+  AUTH_ENDPOINTS.oauthExchange,
   AUTH_ENDPOINTS.logout,
   AUTH_ENDPOINTS.emailSend,
   AUTH_ENDPOINTS.emailVerify,
@@ -342,6 +357,31 @@ export type UserInfo = {
    */
   isNotificationEnabled: boolean;
 };
+
+/**
+ * Exchanges the short-lived, single-use OAuth callback code for session
+ * tokens. This is a public auth endpoint and is excluded from 401 refresh.
+ */
+export async function exchangeOAuthCode(
+  code: string,
+  config?: AxiosRequestConfig,
+): Promise<AuthTokens> {
+  const normalizedCode = code.trim();
+  if (!normalizedCode) {
+    throw new Error("An OAuth authorization code is required.");
+  }
+
+  const { data } = await api.post<unknown>(
+    AUTH_ENDPOINTS.oauthExchange,
+    { code: normalizedCode },
+    config,
+  );
+  const tokens = parseAuthTokens(data);
+  if (!tokens) {
+    throw new Error("The OAuth exchange response did not contain valid tokens.");
+  }
+  return tokens;
+}
 
 /**
  * Logs in and persists tokens. After this resolves, every subsequent
