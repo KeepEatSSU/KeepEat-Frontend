@@ -21,8 +21,6 @@
 import { isAxiosError } from "axios";
 import * as ImageManipulator from "expo-image-manipulator";
 import { api } from "@/services/api";
-import { tokenStorage } from "@/services/tokenStorage";
-import { API_BASE_URL } from "@/constants/config";
 import { UNITS, type IngredientDraft, type Unit } from "@/constants/domain";
 import type { ApiStorageType } from "@/types/ingredientMaster";
 import {
@@ -188,20 +186,15 @@ async function toJpegUri(sourceUri: string): Promise<string> {
 export async function parseReceiptImage(
   imageUri: string,
 ): Promise<OcrIngredientCandidate[]> {
-  // TEMP: surface the URI scheme during integration debugging. Remove once
-  // we've confirmed multipart uploads land cleanly across iOS / Android.
-  if (__DEV__) console.log("[OCR] uri:", imageUri);
-
   // Step 1: convert to JPEG. Failure here is a client-side issue distinct
   // from server errors, so surface a different toast.
   let uploadUri: string;
   try {
     uploadUri = await toJpegUri(imageUri);
-  } catch (e) {
-    if (__DEV__) console.log("[OCR] preprocess failed:", e);
+  } catch {
+    if (__DEV__) console.log("[OCR] image preprocessing failed");
     throw new OcrParseError(PREPROCESS_FAILED_MESSAGE);
   }
-  if (__DEV__) console.log("[OCR] converted uri:", uploadUri);
 
   const form = new FormData();
   // RN's FormData accepts the {uri,name,type} shape — TS DOM lib doesn't model
@@ -212,46 +205,27 @@ export async function parseReceiptImage(
       uri: uploadUri,
       name: "ocr_image.jpg",
       type: "image/jpeg",
-    } as any,
+    } as unknown as Blob,
   );
 
   try {
-    const token = await tokenStorage.getAccessToken();
-    const headers: Record<string, string> = {};
-    if (token) {
-      headers["Authorization"] = `Bearer ${token}`;
-    }
-    // ⚠️ 핵심 조건: `fetch`의 `headers` 객체에는 절대로 `Content-Type`을 적지 말 것!
-    // 비워둬야 RN의 fetch가 자동으로 boundary가 포함된 multipart 헤더를 생성함.
+    const { data } = await api.post<OcrParseResponse>(
+      "/api/v1/ocr/parse",
+      form,
+      {
+        // The previous fetch request had no client-side timeout.
+        timeout: 0,
+      },
+    );
 
-    const response = await fetch(`${API_BASE_URL}/api/v1/ocr/parse`, {
-      method: "POST",
-      headers,
-      body: form,
-    });
-
-    if (!response.ok) {
-      if (__DEV__) {
-        const errorBody = await response.text().catch(() => "<unreadable>");
-        console.log(`[OCR] error ${response.status}:`, errorBody);
-      }
-      const error: any = new Error("Fetch failed");
-      error.status = response.status;
-      throw error;
-    }
-
-    const data: OcrParseResponse = await response.json();
     if (__DEV__) {
-      const count = data.candidates?.length ?? 0;
-      console.log(`[OCR] received ${count} candidates`);
       console.log(
-        "[OCR] candidates detail:",
-        JSON.stringify(data.candidates, null, 2),
+        `[OCR] received ${data.candidates?.length ?? 0} candidates`,
       );
     }
     return data.candidates ?? [];
-  } catch (e: any) {
-    const status = isAxiosError(e) ? e.response?.status : e.status;
+  } catch (error: unknown) {
+    const status = isAxiosError(error) ? error.response?.status : undefined;
     throw new OcrParseError(messageForStatus(status), status);
   }
 }

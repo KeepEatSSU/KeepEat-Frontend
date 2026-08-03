@@ -23,12 +23,12 @@ import {
 } from "@/services/authSession";
 import { tokenStorage } from "@/services/tokenStorage";
 import axios, {
-  AxiosError,
   AxiosHeaders,
-  AxiosRequestConfig,
-  AxiosResponse,
-  InternalAxiosRequestConfig,
   isAxiosError,
+  type AxiosError,
+  type AxiosRequestConfig,
+  type AxiosResponse,
+  type InternalAxiosRequestConfig,
 } from "axios";
 
 // ─── Error message helper ────────────────────────────────────────────────────
@@ -180,13 +180,12 @@ api.interceptors.request.use(async (config: InternalAxiosRequestConfig) => {
     headers.set("Authorization", `Bearer ${token}`);
     config.headers = headers;
   }
-  // Multipart uploads: drop the inherited "application/json" content-type so
-  // RN's XHR adapter (and axios's FormData detection) generates a proper
-  // "multipart/form-data; boundary=..." header. Setting "multipart/form-data"
-  // manually leaves the boundary blank and the server fails to parse.
+  // Axios assigns application/x-www-form-urlencoded when a POST has no
+  // content type. RN's native networking layer needs the multipart media type
+  // to build the body, then appends/overrides the boundary on iOS and Android.
   if (typeof FormData !== "undefined" && config.data instanceof FormData) {
     const headers = AxiosHeaders.from(config.headers);
-    headers.delete("Content-Type");
+    headers.set("Content-Type", "multipart/form-data");
     config.headers = headers;
   }
   logRequest(config);
