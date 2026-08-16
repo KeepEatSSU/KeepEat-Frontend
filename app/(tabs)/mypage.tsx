@@ -16,7 +16,7 @@ import { useToast } from "@/components/Toast";
 import { ConfirmModal } from "@/components/ConfirmModal";
 import { DeletePasswordModal } from "@/components/DeletePasswordModal";
 import { getErrorMessage } from "@/services/api";
-import { syncPushTokenWithServer } from "@/services/pushNotifications";
+import { ensurePushTokenRegistered } from "@/services/pushNotifications";
 import { clearRecentIngredients } from "@/services/recentIngredients";
 import {
   Colors,
@@ -87,7 +87,7 @@ export default function MyPageScreen() {
   //   • granted   → 끄려는 의도. 앱은 권한 회수 불가 → OS 설정 앱으로 보냄.
   //   • undetermined / canAskAgain → 첫 요청. 그 자리서 OS 권한 팝업 → 결과로
   //     osPermDenied 갱신. granted 되면 토큰 발급/등록까지 이어줌
-  //     (로그인 시엔 권한이 없어 토큰을 못 받았을 수 있으므로 여기서 새로 sync).
+  //     (로그인 시엔 권한이 없어 토큰을 못 받았을 수 있으므로 여기서 재확인).
   //   • 거부 확정(canAskAgain false) → 설정 앱으로.
   const handleNotificationRowPress = async () => {
     try {
@@ -100,7 +100,7 @@ export default function MyPageScreen() {
         const requested = await Notifications.requestPermissionsAsync();
         const granted = requested.status === "granted";
         setOsPermDenied(!granted);
-        if (granted) syncPushTokenWithServer();
+        if (granted && user) void ensurePushTokenRegistered(user.id);
         return;
       }
       openOsSettings();

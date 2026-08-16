@@ -14,7 +14,6 @@ import { RecipeRecommendationProvider } from "@/context/RecipeRecommendationCont
 import { AuthProvider, useAuth } from "@/context/AuthContext";
 import { NotificationProvider } from "@/context/NotificationContext";
 import { IngredientMasterProvider } from "@/context/IngredientMasterContext";
-import { registerForPushNotificationsAsync } from "@/services/pushNotifications";
 
 // Required for the in-app browser auth session to dismiss cleanly on iOS
 // after a redirect back to the app. Must run once at module scope, before
@@ -63,16 +62,6 @@ function AuthGate({ children }: { children: React.ReactNode }) {
 }
 
 export default function RootLayout() {
-  // One-shot push-token registration on app boot. Server upload comes later;
-  // for now we just log so we can verify the issuance pipeline end-to-end.
-  useEffect(() => {
-    registerForPushNotificationsAsync().then((token) => {
-      if (token) {
-        console.log("🔔 Expo Push Token:", token);
-      }
-    });
-  }, []);
-
   // Android system navigation bar: match the tab bar's white bottom so the
   // 3-button / gesture area blends into our bar. Under edge-to-edge the OS
   // may keep the bar transparent and only honor button style — that's fine,

@@ -1,16 +1,12 @@
 /**
  * KeepEat — Expo push-notification token registration.
  *
- * Single entry point that handles the full Expo push-token dance:
- * device check → permission check/request → Android channel setup →
- * token issuance via the EAS projectId.
- *
- * This module is currently issue-only — the caller is responsible for
- * what to do with the returned token (server registration arrives in a
- * later milestone). All failure modes resolve to `null` rather than
- * throwing so a missing token never blocks app startup.
+ * Handles token issuance and idempotent server registration. Registration is
+ * keyed by authenticated user ID + current Expo token and remains best-effort
+ * so notification setup never blocks login or app startup.
  */
 
+import AsyncStorage from "@react-native-async-storage/async-storage";
 import Constants from "expo-constants";
 import * as Notifications from "expo-notifications";
 import { Platform } from "react-native";
@@ -18,6 +14,61 @@ import {
   deletePushToken,
   registerPushToken,
 } from "@/services/notifications";
+import { tokenStorage } from "@/services/tokenStorage";
+
+const REGISTRATION_STATE_KEY = "keepeat:pushTokenRegistration";
+
+type PushTokenRegistrationState = {
+  userId: string;
+  expoPushToken: string;
+};
+
+const inFlightRegistrations = new Map<string, Promise<void>>();
+let registrationQueue: Promise<void> = Promise.resolve();
+
+function normalizeUserId(userId: number | string): string | null {
+  const normalized = String(userId).trim();
+  return normalized.length > 0 ? normalized : null;
+}
+
+function parseRegistrationState(raw: string | null): PushTokenRegistrationState | null {
+  if (!raw) return null;
+  try {
+    const value: unknown = JSON.parse(raw);
+    if (value == null || typeof value !== "object" || Array.isArray(value)) {
+      return null;
+    }
+    const state = value as Record<string, unknown>;
+    if (
+      typeof state.userId !== "string" ||
+      state.userId.length === 0 ||
+      typeof state.expoPushToken !== "string" ||
+      state.expoPushToken.length === 0
+    ) {
+      return null;
+    }
+    return {
+      userId: state.userId,
+      expoPushToken: state.expoPushToken,
+    };
+  } catch {
+    return null;
+  }
+}
+
+async function readRegistrationState(): Promise<PushTokenRegistrationState | null> {
+  try {
+    return parseRegistrationState(
+      await AsyncStorage.getItem(REGISTRATION_STATE_KEY),
+    );
+  } catch {
+    return null;
+  }
+}
+
+export async function clearPushTokenRegistrationState(): Promise<void> {
+  await AsyncStorage.removeItem(REGISTRATION_STATE_KEY);
+}
 
 /**
  * Issue an Expo push token if the user has already granted notification
@@ -61,27 +112,84 @@ export async function registerForPushNotificationsAsync(): Promise<string | null
 
     const token = await Notifications.getExpoPushTokenAsync({ projectId });
     return token.data;
-  } catch (err) {
-    console.warn("[pushNotifications] Failed to register for push notifications", err);
+  } catch {
+    if (__DEV__) {
+      console.warn("[pushNotifications] Expo push token is unavailable");
+    }
     return null;
   }
 }
 
 /**
- * 로그인 직후 호출 — 현재 기기의 Expo push token을 발급 + 서버에 등록.
- * Best-effort: 권한 거부 / 토큰 발급 실패 / 서버 오류 어떤 단계에서도
- * 예외를 흘리지 않아 로그인 본 흐름을 막지 않음.
+ * Ensures this authenticated user + Expo token pair is registered exactly once
+ * per persisted local state. Concurrent callers for the same pair share one
+ * promise; differing pairs are serialized so account/token changes finish in
+ * trigger order. Failures intentionally leave the state unset for a later
+ * lifecycle trigger to retry.
  */
-export async function syncPushTokenWithServer(): Promise<void> {
+export async function ensurePushTokenRegistered(
+  userId: number | string,
+): Promise<void> {
+  const normalizedUserId = normalizeUserId(userId);
+  if (!normalizedUserId) return;
+
   try {
-    const token = await registerForPushNotificationsAsync();
-    if (!token) return;
-    await registerPushToken(token);
-  } catch (err) {
-    if (__DEV__) {
-      console.warn("[pushNotifications] server registration failed", err);
-    }
+    const accessToken = await tokenStorage.getAccessToken();
+    if (!accessToken) return;
+
+    const expoPushToken = await registerForPushNotificationsAsync();
+    if (!expoPushToken) return;
+
+    const registrationKey = `${normalizedUserId}\u0000${expoPushToken}`;
+    const inFlight = inFlightRegistrations.get(registrationKey);
+    if (inFlight) return inFlight;
+
+    const operation = registrationQueue.then(async () => {
+      const registered = await readRegistrationState();
+      if (
+        registered?.userId === normalizedUserId &&
+        registered.expoPushToken === expoPushToken
+      ) {
+        return;
+      }
+
+      try {
+        await registerPushToken(expoPushToken);
+        const nextState: PushTokenRegistrationState = {
+          userId: normalizedUserId,
+          expoPushToken,
+        };
+        await AsyncStorage.setItem(
+          REGISTRATION_STATE_KEY,
+          JSON.stringify(nextState),
+        );
+      } catch {
+        if (__DEV__) {
+          console.warn("[pushNotifications] token registration was not completed");
+        }
+      }
+    });
+    const tracked = operation.finally(() => {
+      inFlightRegistrations.delete(registrationKey);
+    });
+    inFlightRegistrations.set(registrationKey, tracked);
+    registrationQueue = tracked.catch(() => {});
+    return tracked;
+  } catch {
+    // SecureStore/token issuance failures are non-blocking and leave no
+    // registration metadata, so a later lifecycle trigger can retry.
   }
+}
+
+export function subscribeToPushTokenChanges(
+  userId: number | string,
+): () => void {
+  if (Platform.OS === "web") return () => {};
+
+  const subscription = Notifications.addPushTokenListener(() => {
+    void ensurePushTokenRegistered(userId);
+  });
+  return () => subscription.remove();
 }
 
 /**
@@ -92,11 +200,18 @@ export async function syncPushTokenWithServer(): Promise<void> {
 export async function clearPushTokenOnServer(): Promise<void> {
   try {
     const token = await registerForPushNotificationsAsync();
-    if (!token) return;
-    await deletePushToken(token);
-  } catch (err) {
+    if (token) await deletePushToken(token);
+  } catch {
     if (__DEV__) {
-      console.warn("[pushNotifications] server deregistration failed", err);
+      console.warn("[pushNotifications] server deregistration failed");
+    }
+  } finally {
+    try {
+      await clearPushTokenRegistrationState();
+    } catch {
+      if (__DEV__) {
+        console.warn("[pushNotifications] local registration cleanup failed");
+      }
     }
   }
 }

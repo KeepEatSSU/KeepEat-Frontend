@@ -12,7 +12,7 @@
  *   3) OS 권한 상태가 'undetermined'
  *
  * "허용" → requestPermissionsAsync로 OS 시스템 다이얼로그 → granted면
- * syncPushTokenWithServer로 토큰 발급/등록까지 자연 이어짐.
+ * ensurePushTokenRegistered로 토큰 발급/등록까지 자연 이어짐.
  * "나중에" → 아무 동작 안 함. 플래그는 두 버튼 모두에서 저장되어 다음
  * 부팅부터는 자동으로 안 뜬다.
  *
@@ -25,12 +25,12 @@ import AsyncStorage from "@react-native-async-storage/async-storage";
 import * as Notifications from "expo-notifications";
 import { ConfirmModal } from "@/components/ConfirmModal";
 import { useAuth } from "@/context/AuthContext";
-import { syncPushTokenWithServer } from "@/services/pushNotifications";
+import { ensurePushTokenRegistered } from "@/services/pushNotifications";
 
 const ASKED_KEY = "keepeat:askedPushPermission";
 
 export function PushPermissionPrompt() {
-  const { isAuthenticated } = useAuth();
+  const { isAuthenticated, user } = useAuth();
   const [visible, setVisible] = useState(false);
 
   useEffect(() => {
@@ -69,8 +69,8 @@ export function PushPermissionPrompt() {
       const { status } = await Notifications.requestPermissionsAsync();
       if (status === "granted") {
         // 권한 획득 → 로그인 시점엔 토큰을 발급 못했으므로 (registerForPush…가
-        // granted 아닐 땐 null 반환) 여기서 새로 sync. 실패해도 swallow.
-        syncPushTokenWithServer();
+        // granted 아닐 땐 null 반환) 여기서 등록을 다시 확인. 실패해도 swallow.
+        if (user) void ensurePushTokenRegistered(user.id);
       }
     } catch {
       // OS 다이얼로그 호출 실패 — 무시. 이후 토글에서 다시 시도 가능.

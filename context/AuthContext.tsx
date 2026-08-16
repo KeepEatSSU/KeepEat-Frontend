@@ -32,7 +32,8 @@ import {
 import { tokenStorage } from "@/services/tokenStorage";
 import {
   clearPushTokenOnServer,
-  syncPushTokenWithServer,
+  ensurePushTokenRegistered,
+  subscribeToPushTokenChanges,
 } from "@/services/pushNotifications";
 import { DEV_BYPASS_AUTH } from "@/constants/config";
 import { MOCK_JWT, MOCK_USER } from "@/mocks/devAuth";
@@ -73,6 +74,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [user, setUser] = useState<UserInfo | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const mountedRef = useRef(true);
+  const authenticatedUserId = user?.id;
 
   // Boot: if a stored access token exists, validate it via /me.
   // Dev bypass short-circuits the network call and seeds a fake session.
@@ -102,7 +104,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
           // wouldn't fire here without this call. Fire-and-forget — the
           // wrapper swallows its own errors so the boot flow can't be
           // blocked by push-server hiccups.
-          syncPushTokenWithServer();
+          void ensurePushTokenRegistered(me.id);
         }
       } catch {
         await tokenStorage.clearTokens();
@@ -127,6 +129,21 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   }, []);
 
   useEffect(() => {
+    const off = authEvents.onTokensRefreshed(() => {
+      if (BYPASS_ACTIVE || authenticatedUserId == null) return;
+      void ensurePushTokenRegistered(authenticatedUserId);
+    });
+    return () => {
+      off();
+    };
+  }, [authenticatedUserId]);
+
+  useEffect(() => {
+    if (BYPASS_ACTIVE || authenticatedUserId == null) return;
+    return subscribeToPushTokenChanges(authenticatedUserId);
+  }, [authenticatedUserId]);
+
+  useEffect(() => {
     mountedRef.current = true;
     return () => {
       mountedRef.current = false;
@@ -144,7 +161,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     setUser(me);
     // Best-effort push-token registration. Fire-and-forget so it can't
     // delay the login UI; failures are swallowed inside the wrapper.
-    syncPushTokenWithServer();
+    void ensurePushTokenRegistered(me.id);
   }, []);
 
   const loginWithTokens = useCallback(
@@ -159,7 +176,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       await tokenStorage.setTokens(accessToken, refreshToken);
       const me = await getMyInfo();
       setUser(me);
-      syncPushTokenWithServer();
+      void ensurePushTokenRegistered(me.id);
     },
     [],
   );
@@ -176,7 +193,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       await apiLogin(email, password);
       const me = await getMyInfo();
       setUser(me);
-      syncPushTokenWithServer();
+      void ensurePushTokenRegistered(me.id);
     },
     [],
   );

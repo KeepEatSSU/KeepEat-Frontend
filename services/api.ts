@@ -53,7 +53,9 @@ export function getErrorMessage(error: unknown, fallback: string): string {
 // Avoid coupling the service layer to expo-router. Screens subscribe.
 
 type LogoutListener = () => void;
+type TokensRefreshedListener = () => void;
 const logoutListeners = new Set<LogoutListener>();
+const tokensRefreshedListeners = new Set<TokensRefreshedListener>();
 
 export const authEvents = {
   onLogout(listener: LogoutListener): () => void {
@@ -62,6 +64,13 @@ export const authEvents = {
   },
   emitLogout(): void {
     logoutListeners.forEach((l) => l());
+  },
+  onTokensRefreshed(listener: TokensRefreshedListener): () => void {
+    tokensRefreshedListeners.add(listener);
+    return () => tokensRefreshedListeners.delete(listener);
+  },
+  emitTokensRefreshed(): void {
+    tokensRefreshedListeners.forEach((listener) => listener());
   },
 };
 
@@ -279,6 +288,7 @@ const refreshCoordinator = createAuthRefreshCoordinator({
   requestRefresh: requestRefreshTokens,
   saveAuthTokens: async ({ accessToken, refreshToken }) => {
     await tokenStorage.setTokens(accessToken, refreshToken);
+    authEvents.emitTokensRefreshed();
     if (__DEV__) {
       console.log("[API REFRESH] success, retrying original request");
     }
