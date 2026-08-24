@@ -23,6 +23,7 @@ type PushTokenRegistrationState = {
   expoPushToken: string;
 };
 
+const inFlightEnsures = new Map<string, Promise<void>>();
 const inFlightRegistrations = new Map<string, Promise<void>>();
 let registrationQueue: Promise<void> = Promise.resolve();
 
@@ -121,18 +122,11 @@ export async function registerForPushNotificationsAsync(): Promise<string | null
 }
 
 /**
- * Ensures this authenticated user + Expo token pair is registered exactly once
- * per persisted local state. Concurrent callers for the same pair share one
- * promise; differing pairs are serialized so account/token changes finish in
- * trigger order. Failures intentionally leave the state unset for a later
- * lifecycle trigger to retry.
+ * Runs the token acquisition and registration path for one normalized user ID.
+ * The exported wrapper below installs its re-entry guard before this function
+ * can advance past its first await.
  */
-export async function ensurePushTokenRegistered(
-  userId: number | string,
-): Promise<void> {
-  const normalizedUserId = normalizeUserId(userId);
-  if (!normalizedUserId) return;
-
+async function runPushTokenRegistration(normalizedUserId: string): Promise<void> {
   try {
     const accessToken = await tokenStorage.getAccessToken();
     if (!accessToken) return;
@@ -179,6 +173,32 @@ export async function ensurePushTokenRegistered(
     // SecureStore/token issuance failures are non-blocking and leave no
     // registration metadata, so a later lifecycle trigger can retry.
   }
+}
+
+/**
+ * Ensures this authenticated user + Expo token pair is registered exactly once
+ * per persisted local state. Calls for the same user share the whole execution
+ * before token acquisition, preventing a native token event emitted by that
+ * acquisition from recursively starting another acquisition. The existing
+ * user + token dedupe still protects the server registration stage.
+ */
+export function ensurePushTokenRegistered(
+  userId: number | string,
+): Promise<void> {
+  const normalizedUserId = normalizeUserId(userId);
+  if (!normalizedUserId) return Promise.resolve();
+
+  const inFlight = inFlightEnsures.get(normalizedUserId);
+  if (inFlight) return inFlight;
+
+  const operation = runPushTokenRegistration(normalizedUserId);
+  const tracked = operation.finally(() => {
+    if (inFlightEnsures.get(normalizedUserId) === tracked) {
+      inFlightEnsures.delete(normalizedUserId);
+    }
+  });
+  inFlightEnsures.set(normalizedUserId, tracked);
+  return tracked;
 }
 
 export function subscribeToPushTokenChanges(
