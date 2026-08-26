@@ -84,6 +84,7 @@ const SENSITIVE_BODY_KEYS = new Set([
   "currentpassword",
   "accesstoken",
   "refreshtoken",
+  "devicetoken",
   "token",
 ]);
 const SENSITIVE_REQUEST_BODY_KEYS = new Set([
@@ -537,16 +538,20 @@ export async function deleteAccount(password?: string): Promise<void> {
   authEvents.emitLogout();
 }
 
+export type LogoutRequest = {
+  refreshToken: string | null;
+  deviceToken: string | null;
+};
+
 /**
- * Logs out: best-effort server call, then clears tokens and notifies subscribers.
- * Server failure is swallowed — local state must still be cleared.
+ * Invalidates the current backend session. Local cleanup is owned by
+ * AuthContext so it still runs when this request fails.
  */
-export async function logout(): Promise<void> {
-  try {
-    await api.post("/api/users/logout");
-  } catch {
-    // ignore — proceed with local cleanup
-  }
-  await tokenStorage.clearTokens();
-  authEvents.emitLogout();
+export async function logout(request: LogoutRequest): Promise<void> {
+  await api.post(AUTH_ENDPOINTS.logout, request);
+}
+
+/** Invalidates every authenticated session for the current user. */
+export async function logoutAll(): Promise<void> {
+  await api.post(AUTH_ENDPOINTS.logoutAll);
 }

@@ -26,13 +26,16 @@ import {
   getMyInfo,
   login as apiLogin,
   logout as apiLogout,
+  logoutAll as apiLogoutAll,
   signUp as apiSignUp,
   type UserInfo,
 } from "@/services/api";
 import { tokenStorage } from "@/services/tokenStorage";
 import {
+  clearPushTokenRegistrationState,
   clearPushTokenOnServer,
   ensurePushTokenRegistered,
+  getExpoPushTokenForLogout,
   subscribeToPushTokenChanges,
 } from "@/services/pushNotifications";
 import { DEV_BYPASS_AUTH } from "@/constants/config";
@@ -60,6 +63,7 @@ type AuthContextValue = {
    */
   setUserNotificationEnabled: (enabled: boolean) => void;
   logout: () => Promise<void>;
+  logoutAll: () => Promise<void>;
   /**
    * 회원 탈퇴. LOCAL 계정은 password 재확인을 함께 보내야 하고, 소셜 계정은
    * 비워서 호출. 성공 시 logout과 동일하게 token clear + setUser(null)이
@@ -74,7 +78,17 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [user, setUser] = useState<UserInfo | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const mountedRef = useRef(true);
+  const logoutInFlightRef = useRef<Promise<void> | null>(null);
+  const logoutAllInFlightRef = useRef<Promise<void> | null>(null);
   const authenticatedUserId = user?.id;
+
+  const clearLocalSession = useCallback(async (): Promise<void> => {
+    await Promise.allSettled([
+      tokenStorage.clearTokens(),
+      clearPushTokenRegistrationState(),
+    ]);
+    if (mountedRef.current) setUser(null);
+  }, []);
 
   // Boot: if a stored access token exists, validate it via /me.
   // Dev bypass short-circuits the network call and seeds a fake session.
@@ -118,19 +132,27 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     };
   }, []);
 
-  // 401-from-anywhere → forced logout. The interceptor already cleared tokens.
+  // 401-from-anywhere → forced logout. The interceptor clears auth tokens;
+  // this shared cleanup also drops local push-registration ownership.
   useEffect(() => {
     const off = authEvents.onLogout(() => {
-      if (mountedRef.current) setUser(null);
+      void clearLocalSession();
     });
     return () => {
       off();
     };
-  }, []);
+  }, [clearLocalSession]);
 
   useEffect(() => {
     const off = authEvents.onTokensRefreshed(() => {
-      if (BYPASS_ACTIVE || authenticatedUserId == null) return;
+      if (
+        BYPASS_ACTIVE ||
+        authenticatedUserId == null ||
+        logoutInFlightRef.current != null ||
+        logoutAllInFlightRef.current != null
+      ) {
+        return;
+      }
       void ensurePushTokenRegistered(authenticatedUserId);
     });
     return () => {
@@ -202,19 +224,67 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     setUser((prev) => (prev ? { ...prev, isNotificationEnabled: enabled } : prev));
   }, []);
 
-  const logout = useCallback(async () => {
-    if (BYPASS_ACTIVE) {
-      await tokenStorage.clearTokens();
-      setUser(null);
-      return;
-    }
-    // Must run BEFORE apiLogout — the DELETE /api/notifications/token call
-    // needs the Bearer header that apiLogout's clearTokens() will remove.
-    // clearPushTokenOnServer swallows its own errors so it never blocks.
-    await clearPushTokenOnServer();
-    await apiLogout();
-    setUser(null);
-  }, []);
+  const logout = useCallback((): Promise<void> => {
+    const inFlight = logoutInFlightRef.current;
+    if (inFlight) return inFlight;
+
+    const operation = (async () => {
+      if (!BYPASS_ACTIVE) {
+        const [refreshResult, deviceResult] = await Promise.allSettled([
+          tokenStorage.getRefreshToken(),
+          getExpoPushTokenForLogout(),
+        ]);
+        const refreshToken =
+          refreshResult.status === "fulfilled" &&
+          typeof refreshResult.value === "string" &&
+          refreshResult.value.trim().length > 0
+            ? refreshResult.value
+            : null;
+        const deviceToken =
+          deviceResult.status === "fulfilled" &&
+          typeof deviceResult.value === "string" &&
+          deviceResult.value.trim().length > 0
+            ? deviceResult.value
+            : null;
+
+        try {
+          await apiLogout({ refreshToken, deviceToken });
+        } catch {
+          // Server logout is best-effort; local logout must always complete.
+        }
+      }
+
+      await clearLocalSession();
+    })();
+
+    const tracked = operation.finally(() => {
+      if (logoutInFlightRef.current === tracked) {
+        logoutInFlightRef.current = null;
+      }
+    });
+    logoutInFlightRef.current = tracked;
+    return tracked;
+  }, [clearLocalSession]);
+
+  const logoutAll = useCallback((): Promise<void> => {
+    const inFlight = logoutAllInFlightRef.current;
+    if (inFlight) return inFlight;
+
+    const operation = (async () => {
+      if (!BYPASS_ACTIVE) {
+        await apiLogoutAll();
+      }
+      await clearLocalSession();
+    })();
+
+    const tracked = operation.finally(() => {
+      if (logoutAllInFlightRef.current === tracked) {
+        logoutAllInFlightRef.current = null;
+      }
+    });
+    logoutAllInFlightRef.current = tracked;
+    return tracked;
+  }, [clearLocalSession]);
 
   const deleteAccount = useCallback(async (password?: string) => {
     if (BYPASS_ACTIVE) {
@@ -244,6 +314,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       loginWithTokens,
       setUserNotificationEnabled,
       logout,
+      logoutAll,
       deleteAccount,
     }),
     [
@@ -254,6 +325,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       loginWithTokens,
       setUserNotificationEnabled,
       logout,
+      logoutAll,
       deleteAccount,
     ],
   );

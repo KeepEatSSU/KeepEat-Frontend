@@ -27,6 +27,7 @@ export const AUTH_ENDPOINTS = {
   refresh: "/api/users/refresh",
   oauthExchange: "/api/users/oauth2/exchange",
   logout: "/api/users/logout",
+  logoutAll: "/api/users/logout-all",
   emailSend: "/api/users/send",
   emailVerify: "/api/users/verify",
 } as const;

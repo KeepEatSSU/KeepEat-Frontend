@@ -1,5 +1,6 @@
-import { useCallback, useState } from "react";
+import { useCallback, useRef, useState } from "react";
 import {
+  ActivityIndicator,
   Linking,
   View,
   Text,
@@ -29,7 +30,7 @@ import {
 const SHOW_DELETE_ACCOUNT = true;
 
 export default function MyPageScreen() {
-  const { user, logout, deleteAccount } = useAuth();
+  const { user, logout, logoutAll, deleteAccount } = useAuth();
   const { showTopToast } = useToast();
   const router = useRouter();
 
@@ -43,6 +44,9 @@ export default function MyPageScreen() {
   const [googleConfirmVisible, setGoogleConfirmVisible] = useState(false);
   const [passwordModalVisible, setPasswordModalVisible] = useState(false);
   const [deleteSubmitting, setDeleteSubmitting] = useState(false);
+  const [logoutAllConfirmVisible, setLogoutAllConfirmVisible] = useState(false);
+  const [logoutAllSubmitting, setLogoutAllSubmitting] = useState(false);
+  const logoutAllSubmittingRef = useRef(false);
 
   // 탭 진입 / 백그라운드에서 OS 설정 바꾸고 복귀하는 경로 모두 잡기 위해
   // useFocusEffect로 매 focus마다 OS 권한 재확인.
@@ -117,6 +121,34 @@ export default function MyPageScreen() {
       await logout();
     } catch (e) {
       console.warn("[logout]", e);
+    }
+  };
+
+  const handleLogoutAllConfirm = async () => {
+    if (logoutAllSubmittingRef.current) return;
+    logoutAllSubmittingRef.current = true;
+    setLogoutAllSubmitting(true);
+    setLogoutAllConfirmVisible(false);
+
+    try {
+      await logoutAll();
+      showTopToast({
+        message: "모든 기기에서 로그아웃 되었습니다",
+        variant: "success",
+        dedupeKey: "logout-all:success",
+      });
+    } catch (error) {
+      showTopToast({
+        message: getErrorMessage(
+          error,
+          "모든 기기 로그아웃에 실패했어요. 잠시 후 다시 시도해 주세요.",
+        ),
+        variant: "error",
+        dedupeKey: "logout-all:error",
+      });
+    } finally {
+      logoutAllSubmittingRef.current = false;
+      setLogoutAllSubmitting(false);
     }
   };
 
@@ -265,12 +297,35 @@ export default function MyPageScreen() {
         {/* 로그아웃 */}
         <Pressable
           onPress={handleLogout}
+          disabled={logoutAllSubmitting}
+          accessibilityRole="button"
+          accessibilityState={{ disabled: logoutAllSubmitting }}
           style={({ pressed }) => [
             styles.logoutBtn,
-            pressed && { opacity: 0.7 },
+            logoutAllSubmitting && styles.buttonDisabled,
+            pressed && !logoutAllSubmitting && { opacity: 0.7 },
           ]}
         >
           <Text style={styles.logoutText}>로그아웃</Text>
+        </Pressable>
+
+        <Pressable
+          onPress={() => setLogoutAllConfirmVisible(true)}
+          disabled={logoutAllSubmitting}
+          accessibilityRole="button"
+          accessibilityLabel="모든 기기에서 로그아웃"
+          accessibilityState={{ disabled: logoutAllSubmitting }}
+          style={({ pressed }) => [
+            styles.logoutAllBtn,
+            logoutAllSubmitting && styles.buttonDisabled,
+            pressed && !logoutAllSubmitting && { opacity: 0.7 },
+          ]}
+        >
+          {logoutAllSubmitting ? (
+            <ActivityIndicator color={Colors.error} />
+          ) : (
+            <Text style={styles.logoutAllText}>모든 기기에서 로그아웃</Text>
+          )}
         </Pressable>
 
         {/* 회원탈퇴 */}
@@ -286,6 +341,17 @@ export default function MyPageScreen() {
           </Pressable>
         )}
       </ScrollView>
+
+      <ConfirmModal
+        visible={logoutAllConfirmVisible}
+        title="모든 기기에서 로그아웃하시겠습니까?"
+        subtitle="현재 기기를 포함해 로그인된 모든 기기에서 로그아웃됩니다."
+        confirmLabel="모두 로그아웃"
+        cancelLabel="취소"
+        destructive
+        onConfirm={handleLogoutAllConfirm}
+        onCancel={() => setLogoutAllConfirmVisible(false)}
+      />
 
       <ConfirmModal
         visible={googleConfirmVisible}
@@ -412,6 +478,24 @@ const styles = StyleSheet.create({
     fontSize: FontSize.bodyMd,
     fontWeight: FontWeight.bold,
     color: Colors.onSurface,
+  },
+  logoutAllBtn: {
+    width: "100%",
+    minHeight: 52,
+    paddingVertical: Spacing.md + 2,
+    borderRadius: Radius.lg,
+    backgroundColor: Colors.errorContainer,
+    alignItems: "center",
+    justifyContent: "center",
+    marginTop: Spacing.md,
+  },
+  logoutAllText: {
+    fontSize: FontSize.bodyMd,
+    fontWeight: FontWeight.bold,
+    color: Colors.error,
+  },
+  buttonDisabled: {
+    opacity: 0.55,
   },
   deleteBtn: {
     marginTop: Spacing.md,

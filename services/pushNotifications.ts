@@ -26,6 +26,7 @@ type PushTokenRegistrationState = {
 const inFlightEnsures = new Map<string, Promise<void>>();
 const inFlightRegistrations = new Map<string, Promise<void>>();
 let registrationQueue: Promise<void> = Promise.resolve();
+let logoutTokenLookupDepth = 0;
 
 function normalizeUserId(userId: number | string): string | null {
   const normalized = String(userId).trim();
@@ -122,6 +123,20 @@ export async function registerForPushNotificationsAsync(): Promise<string | null
 }
 
 /**
+ * Reads the token for the logout request without letting that explicit lookup
+ * feed back through the native token listener and re-register the ending
+ * session. Normal token-change events remain enabled outside this short scope.
+ */
+export async function getExpoPushTokenForLogout(): Promise<string | null> {
+  logoutTokenLookupDepth += 1;
+  try {
+    return await registerForPushNotificationsAsync();
+  } finally {
+    logoutTokenLookupDepth -= 1;
+  }
+}
+
+/**
  * Runs the token acquisition and registration path for one normalized user ID.
  * The exported wrapper below installs its re-entry guard before this function
  * can advance past its first await.
@@ -207,6 +222,7 @@ export function subscribeToPushTokenChanges(
   if (Platform.OS === "web") return () => {};
 
   const subscription = Notifications.addPushTokenListener(() => {
+    if (logoutTokenLookupDepth > 0) return;
     void ensurePushTokenRegistered(userId);
   });
   return () => subscription.remove();
