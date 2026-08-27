@@ -25,6 +25,7 @@ export function NotificationBell({ unreadCount, onPress }: Props) {
   return (
     <Pressable
       onPress={onPress}
+      testID="header.notification-bell"
       accessibilityRole="button"
       accessibilityLabel={
         hasUnread ? `알림 ${unreadCount}개 안 읽음` : "알림"

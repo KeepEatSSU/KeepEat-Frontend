@@ -34,6 +34,9 @@ yarn-error.*
 .env
 .env*.local
 
+# e2e credentials (never commit)
+e2e/maestro/.env.maestro
+
 # typescript
 *.tsbuildinfo
 

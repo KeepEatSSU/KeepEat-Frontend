@@ -1,0 +1,32 @@
+# [파괴적] 현재 기기 로그아웃 → 재실행 시 세션이 복구되지 않는지 확인.
+#
+# 이 flow 는 기본 suite 에서 제외한다. 실행하면 이 기기의 refresh 토큰이
+# 서버에서 무효화되어, 이후의 비파괴 flow 들이 로그인부터 다시 시작해야 한다.
+# 반드시 수동으로만 실행할 것:
+#   maestro test e2e/maestro/flows-destructive/logout.yaml -e TEST_EMAIL=... -e TEST_PASSWORD=...
+appId: com.anonymous.keepeat_front.demo
+---
+- launchApp
+- runFlow: ../common/ensure-logged-in.yaml
+- tapOn:
+    text: "마이"
+- extendedWaitUntil:
+    visible:
+      text: "마이페이지"
+    timeout: 10000
+# 로그아웃 (확인 모달 없이 즉시 실행됨 — "모든 기기에서 로그아웃"과 혼동 금지)
+- tapOn:
+    id: "mypage.logout-button"
+- extendedWaitUntil:
+    visible:
+      id: "login.email.input"
+    timeout: 15000
+# 앱 재실행 → 세션이 복구되지 않고 로그인 화면이어야 한다
+- launchApp:
+    stopApp: true
+- extendedWaitUntil:
+    visible:
+      id: "login.email.input"
+    timeout: 20000
+- assertNotVisible:
+    text: "마이"

@@ -627,6 +627,7 @@ export default function FridgeScreen() {
           {/* Ingredient Grid or Empty State */}
           {filteredIngredients.length > 0 ? (
             <ScrollView
+              testID="home.ingredient-list"
               showsVerticalScrollIndicator={false}
               contentContainerStyle={styles.gridContent}
               keyboardShouldPersistTaps="handled"
@@ -644,7 +645,7 @@ export default function FridgeScreen() {
               ))}
             </ScrollView>
           ) : (
-            <View style={styles.emptyContainer}>
+            <View style={styles.emptyContainer} testID="home.empty-state">
               {(() => {
                 // 진짜 "냉장고 텅 빔" = 검색 없음 + 모든 필터 미적용.
                 const isTrulyEmpty =

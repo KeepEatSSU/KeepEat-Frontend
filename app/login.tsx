@@ -139,6 +139,7 @@ export default function LoginScreen() {
                   placeholder="아이디 또는 이메일"
                   placeholderTextColor={Colors.outline}
                   style={styles.input}
+                  testID="login.email.input"
                   autoCapitalize="none"
                   autoCorrect={false}
                   returnKeyType="next"
@@ -167,6 +168,7 @@ export default function LoginScreen() {
                   placeholder="비밀번호"
                   placeholderTextColor={Colors.outline}
                   style={styles.input}
+                  testID="login.password.input"
                   secureTextEntry={!showPassword}
                   returnKeyType="done"
                   onSubmitEditing={handleLogin}
@@ -197,6 +199,7 @@ export default function LoginScreen() {
             <Pressable
               onPress={handleLogin}
               disabled={!canSubmit}
+              testID="login.submit-button"
               style={({ pressed }) => [
                 styles.primaryBtn,
                 !canSubmit && styles.primaryBtnDisabled,
@@ -224,6 +227,7 @@ export default function LoginScreen() {
             <Pressable
               onPress={() => router.push("/find-password")}
               style={{ padding: Spacing.xs }}
+              testID="login.find-password-link"
             >
               <Text style={styles.linkText}>비밀번호 찾기</Text>
             </Pressable>

@@ -1,0 +1,32 @@
+# 공용 서브플로우 — 세션이 없으면 이메일 로그인, 있으면 그대로 통과.
+# flows/ 밖에 있으므로 `maestro test e2e/maestro/flows` 실행 대상에 포함되지 않는다.
+# 호출하는 쪽에서 launchApp 을 먼저 수행해야 한다.
+appId: com.anonymous.keepeat_front.demo
+---
+# 스플래시/라우팅이 끝나고 로그인 화면이 뜨는지 잠깐 기다린다.
+# 이미 로그인된 세션이면 로그인 화면이 안 뜨므로 optional 로 넘어간다.
+- extendedWaitUntil:
+    visible:
+      id: "login.email.input"
+    timeout: 8000
+    optional: true
+- runFlow:
+    when:
+      visible:
+        id: "login.email.input"
+    commands:
+      - tapOn:
+          id: "login.email.input"
+      - inputText: ${TEST_EMAIL}
+      - hideKeyboard
+      - tapOn:
+          id: "login.password.input"
+      - inputText: ${TEST_PASSWORD}
+      - hideKeyboard
+      - tapOn:
+          id: "login.submit-button"
+# 홈(하단 탭)이 뜰 때까지 대기 — "마이" 탭 라벨은 (tabs) 진입 후 항상 렌더된다.
+- extendedWaitUntil:
+    visible:
+      text: "마이"
+    timeout: 20000

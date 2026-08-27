@@ -1,0 +1,28 @@
+# 01 — 이메일 로그인: 앱 데이터 클리어 → 로그인 → 홈 도달 확인
+appId: com.anonymous.keepeat_front.demo
+---
+- launchApp:
+    clearState: true
+- extendedWaitUntil:
+    visible:
+      id: "login.email.input"
+    timeout: 20000
+- tapOn:
+    id: "login.email.input"
+- inputText: ${TEST_EMAIL}
+- hideKeyboard
+- tapOn:
+    id: "login.password.input"
+- inputText: ${TEST_PASSWORD}
+- hideKeyboard
+- tapOn:
+    id: "login.submit-button"
+# 홈 도달: 하단 탭 라벨이 보이면 (tabs) 진입 성공
+- extendedWaitUntil:
+    visible:
+      text: "마이"
+    timeout: 20000
+- assertVisible:
+    text: "냉장고"
+- assertNotVisible:
+    id: "login.submit-button"

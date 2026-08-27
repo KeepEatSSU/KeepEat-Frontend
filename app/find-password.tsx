@@ -326,6 +326,7 @@ export default function FindPasswordScreen() {
           <View style={styles.headerRow}>
             <Pressable
               onPress={handleBack}
+              testID="find-password.back-button"
               style={({ pressed }) => [
                 styles.backBtn,
                 pressed && { opacity: 0.6 },
@@ -372,6 +373,7 @@ export default function FindPasswordScreen() {
                       placeholder="가입한 이메일"
                       placeholderTextColor={Colors.outline}
                       style={styles.input}
+                      testID="find-password.email.input"
                       keyboardType="email-address"
                       autoCapitalize="none"
                       autoCorrect={false}
@@ -402,6 +404,7 @@ export default function FindPasswordScreen() {
                 <Pressable
                   onPress={() => submitEmail(false)}
                   disabled={!canSubmitEmail}
+                  testID="find-password.submit-button"
                   style={({ pressed }) => [
                     styles.primaryBtn,
                     !canSubmitEmail && styles.primaryBtnDisabled,

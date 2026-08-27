@@ -203,13 +203,17 @@ export function NotificationPopup({
       presentationStyle="fullScreen"
       onRequestClose={onClose}
     >
-      <View style={[styles.screen, { paddingTop: insets.top }]}>
+      <View
+        style={[styles.screen, { paddingTop: insets.top }]}
+        testID="notification-popup.root"
+      >
         {/* Header row 1: close (left) + title (center) + spacer (right,
             visual balance). Mirrors the [close][title][44 spacer] pattern
             used by detail/cooking-* screens so all left-X headers line up. */}
         <View style={styles.headerRow}>
           <Pressable
             onPress={onClose}
+            testID="notification-popup.close-button"
             accessibilityRole="button"
             accessibilityLabel="알림 닫기"
             hitSlop={8}

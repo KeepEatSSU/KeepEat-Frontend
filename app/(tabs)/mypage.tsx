@@ -263,12 +263,20 @@ export default function MyPageScreen() {
             />
           </View>
           {displayName !== "" && (
-            <Text style={styles.userName} numberOfLines={1}>
+            <Text
+              style={styles.userName}
+              numberOfLines={1}
+              testID="mypage.nickname.text"
+            >
               {displayName}
             </Text>
           )}
           {email !== "" && (
-            <Text style={styles.accountInfo} numberOfLines={1}>
+            <Text
+              style={styles.accountInfo}
+              numberOfLines={1}
+              testID="mypage.email.text"
+            >
               {email}
             </Text>
           )}
@@ -326,6 +334,7 @@ export default function MyPageScreen() {
               value={notifDisplayValue}
               onValueChange={handleNotificationSettingToggle}
               disabled={notifSubmitting}
+              testID="mypage.notification-toggle.switch"
               accessibilityLabel={
                 notifDisplayValue ? "푸시 알림 수신 켜짐" : "푸시 알림 수신 꺼짐"
               }
@@ -360,6 +369,7 @@ export default function MyPageScreen() {
         <Pressable
           onPress={handleLogout}
           disabled={logoutAllSubmitting}
+          testID="mypage.logout-button"
           accessibilityRole="button"
           accessibilityState={{ disabled: logoutAllSubmitting }}
           style={({ pressed }) => [
