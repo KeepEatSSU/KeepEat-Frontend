@@ -61,6 +61,16 @@
 없으면 읽음 처리 없이 route만 수행한다. `/recipe-swipe` 직접 진입이나 결과
 표시 자체는 알림을 읽음 처리하지 않는다.
 
+라우팅과 별개로 `RecipeRecommendationContext`가 같은 push를 받아
+`recoverResultFromPush`로 결과를 복구한다. `RECIPE_READY`는 서버에 결과가
+존재한다는 확정 신호로 취급한다: 기존 polling run의 2분 deadline이
+background에서 만료됐더라도 poller를 신선한 deadline으로 재시작해
+`GET /api/v1/recipes/result`를 최소 1회 보장한다 (409면 폴링 재개,
+`POST /generate` 재발행은 없음). poller의 pause는 deadline 시계를 정지시켜
+background 체류 시간이 polling 예산을 소진하지 않는다. deck이 이미
+`ready`/`swiping`이면 지연 도착한 중복 push는 무시한다.
+하네스: `scripts/test/recipe-result-poller.test.mjs`.
+
 ## 스와이프 저장
 
 `app/recipe-swipe.tsx`:

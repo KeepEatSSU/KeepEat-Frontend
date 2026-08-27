@@ -399,28 +399,41 @@ export function RecipeRecommendationProvider({
     if (!isAuthenticatedRef.current) return;
     const poller = pollerRef.current;
     if (!poller) return;
-    if (poller.isRunning) {
-      void poller.expedite();
+
+    // Ready/swiping decks ignore delayed duplicate pushes — a result that is
+    // already on screen (or consumed) must not be clobbered.
+    if (
+      !poller.isRunning &&
+      statusRef.current !== "idle" &&
+      statusRef.current !== "error"
+    ) {
       return;
     }
 
-    // A cold-start/background push can outlive the JS process that submitted
-    // the request. Recover the current user's result without issuing a second
-    // POST. Ready/swiping results ignore delayed duplicate pushes.
-    if (statusRef.current !== "idle" && statusRef.current !== "error") return;
+    // RECIPE_READY means the server holds a finished result right now, so a
+    // /result GET must go out unconditionally — even when the previous run's
+    // 2-minute deadline elapsed while backgrounded, and even before AppState
+    // flips to "active" (start()'s first request bypasses the foreground
+    // gate). Restarting the poller gives that GET a fresh deadline; a 409
+    // (still pending server-side) then simply continues polling. No second
+    // POST is ever issued, and a cold-start push with no live poller takes
+    // this same path.
     requestGenerationRef.current += 1;
     const startedAt = Date.now();
-    statusRef.current = "loading";
-    setState((prev) => ({
-      ...prev,
-      status: "loading",
-      requestedAt: new Date(startedAt),
-    }));
+    if (statusRef.current !== "loading") {
+      statusRef.current = "loading";
+      setState((prev) => ({
+        ...prev,
+        status: "loading",
+        requestedAt: new Date(startedAt),
+      }));
+    }
     void poller.start(startedAt);
   }, []);
 
   // RECIPE_READY is an accelerator, not the sole completion mechanism.
-  // Foreground reception and a push tap share the same poller in-flight guard.
+  // Foreground reception, background-tap resume, and cold start all funnel
+  // into recoverResultFromPush, which restarts the poller unconditionally.
   useEffect(() => {
     if (!isAuthenticated) return;
     let cancelled = false;

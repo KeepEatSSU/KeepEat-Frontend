@@ -61,6 +61,7 @@ export class RecipeResultPoller<T> {
   private active = false;
   private generation = 0;
   private startedAt = 0;
+  private pausedAt: number | null = null;
   private transientRetries = 0;
   private timer: ReturnType<typeof setTimeout> | null = null;
   private inFlight: {
@@ -68,6 +69,7 @@ export class RecipeResultPoller<T> {
     promise: Promise<void>;
   } | null = null;
 
+  private readonly options: RecipeResultPollerOptions<T>;
   private readonly intervalMs: number;
   private readonly timeoutMs: number;
   private readonly requestTimeoutMs: number;
@@ -81,7 +83,8 @@ export class RecipeResultPoller<T> {
     timer: ReturnType<typeof setTimeout>,
   ) => void;
 
-  constructor(private readonly options: RecipeResultPollerOptions<T>) {
+  constructor(options: RecipeResultPollerOptions<T>) {
+    this.options = options;
     this.intervalMs = options.intervalMs ?? DEFAULT_INTERVAL_MS;
     this.timeoutMs = options.timeoutMs ?? DEFAULT_TIMEOUT_MS;
     this.requestTimeoutMs =
@@ -110,15 +113,23 @@ export class RecipeResultPoller<T> {
     return this.requestResult(true);
   }
 
+  /**
+   * Stops timer scheduling and freezes the deadline clock: backgrounded time
+   * must not consume the polling budget, otherwise a resume after the
+   * deadline reports a timeout without ever issuing a request.
+   */
   pause(): void {
     this.clearTimer();
+    if (this.active && this.pausedAt === null) {
+      this.pausedAt = this.now();
+    }
   }
 
   resume(): Promise<void> {
-    return this.requestResult(false);
-  }
-
-  expedite(): Promise<void> {
+    if (this.pausedAt !== null) {
+      this.startedAt += this.now() - this.pausedAt;
+      this.pausedAt = null;
+    }
     return this.requestResult(false);
   }
 
@@ -130,6 +141,7 @@ export class RecipeResultPoller<T> {
     this.active = false;
     this.generation += 1;
     this.startedAt = 0;
+    this.pausedAt = null;
     this.transientRetries = 0;
     this.clearTimer();
   }
