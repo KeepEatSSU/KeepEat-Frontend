@@ -26,6 +26,8 @@
 - `loginWithTokens(accessToken, refreshToken)`
 - `setUserNotificationEnabled(enabled)`
 - `logout()`
+- `logoutAll()`
+- `endLocalSession()` — 네트워크 없이 토큰·푸시 등록 상태·`user`만 비운다. 서버 세션이 이미 사라진 경우(비밀번호 변경 204)에 쓴다.
 - `deleteAccount(password?)`
 
 앱 부팅 시 `tokenStorage.getAccessToken()`이 있으면 `getMyInfo()`로 토큰을 검증한다. 실패하면 토큰을 삭제하고 비인증 상태로 둔다.
@@ -98,12 +100,31 @@
 
 `app/change-password.tsx`:
 
-- 현재 비밀번호, 새 비밀번호, 확인 입력을 검사한다.
+- 현재 비밀번호, 새 비밀번호, 확인 입력을 검사한다. 새 비밀번호 규칙은 서버
+  `PasswordChangeRequest`의 `@Pattern`을 그대로 옮긴 것이다:
+  `^(?=.*[A-Za-z])(?=.*\d)(?=.*[@$!%*#?&])[A-Za-z\d@$!%*#?&]{8,15}$`
+  (허용 특수문자는 `@$!%*#?&` 뿐, 그 밖의 문자는 서버가 400으로 거절한다).
+  현재 비밀번호는 서버 `@Size(max = 72)`에 맞춰 72자로 제한한다.
+  새 비밀번호가 현재 비밀번호와 같으면 전송 전에 막는다(서버도 400을 던진다).
 - `changePassword(currentPassword, newPassword)`를 호출한다.
+- **성공은 204 No Content이며, 서버는 응답 전 같은 트랜잭션에서 해당 유저의
+  모든 UserSession, Expo Push Token, Password Reset Token을 삭제한다.** 즉
+  204가 온 시점에 이 기기의 세션도 이미 서버에 없다. 화면은 안내 토스트를
+  띄운 뒤 `endLocalSession()`으로 로컬 세션을 정리하고, `AuthGate`가 `/login`
+  으로 replace 한다 (`router.back()` 하지 않는다).
+- 실패는 status/`code`로 갈라 보여준다.
+  - 401 `INVALID_CREDENTIALS`: 현재 비밀번호 필드 inline error + 포커스 복귀.
+    인터셉터가 이 code를 refresh 대상에서 제외하므로 원본 401이 그대로 온다.
+  - 401 `code` 없음(`{ error, message }`): 세션 만료. 인터셉터가 이미 로그아웃을
+    진행하므로 폼 대신 toast로 이유만 알린다.
+  - 404 `USER_NOT_FOUND`: 재로그인 안내를 form error로 노출.
+  - 400/500/네트워크: 서버 `message` 우선, 없으면 폴백 문구.
 
 ## TODO / 확인 필요
 
-- 백엔드가 요구하는 정확한 비밀번호 정책. 현재 클라이언트 regex와 일치하는지 확인 필요.
+- 회원가입(`app/signup-profile.tsx`)의 비밀번호 regex는 아직 서버
+  `SignUpRequest` 규칙과 대조하지 않았다. 확인 필요.
+  (비밀번호 변경 화면은 서버 `PasswordChangeRequest`와 정렬 완료.)
 - 이메일 인증번호 만료 시간과 재전송 제한 정책.
 - `UserInfo.provider` casing 정책. 현재 코드는 `LOCAL`/`google` 혼재를 방어한다.
 - 서버의 알림 설정 API와 현재 마이페이지 OS 권한 중심 UX의 최종 정책.

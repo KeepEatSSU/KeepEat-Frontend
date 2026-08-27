@@ -96,9 +96,12 @@ eas update --channel demo --environment preview
 eas update --channel production --environment production
 ```
 
-Android demo 빌드는 `.demo` package로 등록한 별도 Firebase 설정 파일이 필요합니다.
-EAS `preview` Environment에 파일 변수 `GOOGLE_SERVICES_JSON`을 등록하면 동적 app
-config가 해당 파일을 사용합니다. EAS Update는 demo/production channel과
+Android demo 빌드가 푸시 토큰을 발급하려면 `google-services.json`에
+`.demo` package(`com.anonymous.keepeat_front.demo`) client 항목이 있어야 합니다.
+Firebase 콘솔에서 같은 프로젝트에 demo package용 Android 앱을 추가한 뒤 재발급한
+`google-services.json`(두 client 포함)을 레포 루트에 두면 demo/production이 같은
+파일을 공유합니다. EAS `preview` Environment에 파일 변수 `GOOGLE_SERVICES_JSON`을
+등록하면 demo 빌드는 해당 파일을 우선 사용하고, 없으면 루트 파일로 fallback합니다. EAS Update는 demo/production channel과
 variant별 runtimeVersion으로 분리합니다.
 
 ## 프론트엔드 구현 범위

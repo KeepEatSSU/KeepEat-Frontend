@@ -65,6 +65,16 @@ type AuthContextValue = {
   logout: () => Promise<void>;
   logoutAll: () => Promise<void>;
   /**
+   * 서버 세션이 이미 사라진 상태에서 로컬 세션만 정리한다.
+   *
+   * 비밀번호 변경(PATCH /api/users/me/password)이 204를 돌려준 시점에는 서버가
+   * 이미 해당 유저의 모든 UserSession과 푸시 토큰을 삭제한 뒤다. 이때
+   * `logout()`을 부르면 죽은 세션으로 /logout을 한 번 더 때리고 401 → refresh
+   * 실패 경로를 타게 되므로, 네트워크 없이 토큰·푸시 등록 상태·user만 비운다.
+   * setUser(null) → AuthGate가 /login으로 replace 한다.
+   */
+  endLocalSession: () => Promise<void>;
+  /**
    * 회원 탈퇴. LOCAL 계정은 password 재확인을 함께 보내야 하고, 소셜 계정은
    * 비워서 호출. 성공 시 logout과 동일하게 token clear + setUser(null)이
    * 적용돼 AuthGate가 /login으로 라우팅한다.
@@ -315,6 +325,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       setUserNotificationEnabled,
       logout,
       logoutAll,
+      endLocalSession: clearLocalSession,
       deleteAccount,
     }),
     [
@@ -326,6 +337,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       setUserNotificationEnabled,
       logout,
       logoutAll,
+      clearLocalSession,
       deleteAccount,
     ],
   );

@@ -49,6 +49,45 @@ export function getErrorMessage(error: unknown, fallback: string): string {
   return fallback;
 }
 
+/**
+ * 에러 응답의 HTTP status. 네트워크 실패/타임아웃처럼 응답 자체가 없으면 null.
+ */
+export function getErrorStatus(error: unknown): number | null {
+  if (isAxiosError(error)) return error.response?.status ?? null;
+  return null;
+}
+
+/**
+ * 429 응답의 `Retry-After` 헤더(초). 헤더가 없거나 정수 초로 읽을 수 없으면
+ * null — 이때 화면은 카운트다운 없이 서버 message만 보여준다. 프론트가 임의
+ * 대기 시간을 지어내지 않기 위해, 값은 오직 서버 헤더에서만 온다.
+ * (HTTP-date 형식은 현재 백엔드가 쓰지 않으므로 지원하지 않는다.)
+ */
+export function getRetryAfterSeconds(error: unknown): number | null {
+  if (!isAxiosError(error)) return null;
+  const raw: unknown = error.response?.headers?.["retry-after"];
+  if (typeof raw !== "string" && typeof raw !== "number") return null;
+  const parsed = Number.parseInt(String(raw), 10);
+  return Number.isInteger(parsed) && parsed >= 0 ? parsed : null;
+}
+
+/**
+ * 백엔드 에러 body의 `code` 필드(`{ status, code, message }`).
+ *
+ * 토큰 만료/세션 폐기 401만 `{ error, message }` 포맷이라 `code`가 없다.
+ * 따라서 "401 + code === null"은 호출부에서 세션이 사라진 상황으로 읽을 수 있다.
+ * body가 없거나 object가 아니면(HTML 에러 페이지, 빈 응답 등) null.
+ */
+export function getErrorCode(error: unknown): string | null {
+  if (!isAxiosError(error)) return null;
+  const data: unknown = error.response?.data;
+  if (data === null || typeof data !== "object" || Array.isArray(data)) {
+    return null;
+  }
+  const code: unknown = (data as { code?: unknown }).code;
+  return typeof code === "string" && code.trim().length > 0 ? code : null;
+}
+
 // ─── Auth event bus ───────────────────────────────────────────────────────────
 // Avoid coupling the service layer to expo-router. Screens subscribe.
 
@@ -85,6 +124,7 @@ const SENSITIVE_BODY_KEYS = new Set([
   "accesstoken",
   "refreshtoken",
   "devicetoken",
+  "resettoken",
   "token",
 ]);
 const SENSITIVE_REQUEST_BODY_KEYS = new Set([
@@ -257,6 +297,32 @@ function isRefreshExcluded(url: string | undefined): boolean {
   );
 }
 
+/**
+ * 백엔드는 401을 서로 다른 두 body 포맷으로 내려준다.
+ *
+ *   자격증명 불일치  { status, code: "INVALID_CREDENTIALS", message }  (GlobalExceptionHandler)
+ *   토큰 만료/무효   { error: "Unauthorized", message }                (CustomAuthenticationEntryPoint)
+ *
+ * 후자에만 `code`가 없다는 점이 유일한 구분 근거다. 전자를 refresh 대상으로
+ * 취급하면 비밀번호가 네트워크로 두 번 나가고, refresh가 실패하는 순간
+ * 오타 하나로 강제 로그아웃된다.
+ *
+ * 판별은 한쪽으로만 확신을 요구한다 — `code`가 정확히 "INVALID_CREDENTIALS"인
+ * 문자열일 때만 true. 응답이 없거나, body가 null/문자열/배열이거나, `code`가
+ * 문자열이 아니거나 다른 값이면 false를 돌려주고 기존 refresh 흐름을 그대로
+ * 타게 둔다. 판별 실패 시의 안전한 기본값은 "오늘과 동일한 동작"이다.
+ */
+const INVALID_CREDENTIALS_CODE = "INVALID_CREDENTIALS";
+
+function isInvalidCredentialsError(error: AxiosError): boolean {
+  const data: unknown = error.response?.data;
+  if (data === null || typeof data !== "object" || Array.isArray(data)) {
+    return false;
+  }
+  const code: unknown = (data as { code?: unknown }).code;
+  return typeof code === "string" && code === INVALID_CREDENTIALS_CODE;
+}
+
 async function requestRefreshTokens(refreshToken: string): Promise<unknown> {
   if (__DEV__) console.log("[API REFRESH] attempting refresh...");
   if (__DEV__) console.log(`[API REQ] POST ${AUTH_ENDPOINTS.refresh}`);
@@ -324,6 +390,20 @@ api.interceptors.response.use(
       return Promise.reject(error);
     }
 
+    // 자격증명 실패 401(현재 비밀번호 오타 등)은 토큰 만료가 아니다. refresh를
+    // 보내지 않고, _retry 마킹도 재시도도 하지 않고, logout도 emit하지 않는다.
+    // 호출부가 status와 body의 code/message를 읽을 수 있도록 원본 에러를 그대로
+    // 넘긴다. 로그에는 method/path만 남긴다 — 요청 body는 절대 싣지 않는다.
+    if (isInvalidCredentialsError(error)) {
+      if (__DEV__) {
+        const method = (original.method ?? "GET").toUpperCase();
+        console.log(
+          `[API AUTH] credential failure — skipping refresh: ${method} ${pathOf(original)}`,
+        );
+      }
+      return Promise.reject(error);
+    }
+
     original._retry = true;
 
     try {
@@ -363,8 +443,8 @@ export type UserInfo = {
   provider: "LOCAL" | "google";
   /**
    * 서버가 기억하는 전체 푸시 알림 ON/OFF 상태. /me에서 받음.
-   * 토글(PATCH /api/users/me/notification-setting) 성공 시 클라이언트도 같이
-   * 갱신해 다음 화면 렌더에 일관성 유지.
+   * `updateNotificationSetting(enabled)` 성공 시 같은 컬럼이 바뀌므로
+   * 클라이언트도 로컬 merge로 같이 갱신해 다음 화면 렌더에 일관성 유지.
    */
   isNotificationEnabled: boolean;
 };
@@ -443,12 +523,14 @@ export async function verifyEmailCode(
 }
 
 /**
- * Sends a temporary password to the user's email. Public endpoint (no auth
- * header needed) — same shape as `sendEmailCode`. The server returns a
- * plain-string message we surface as a toast on success. Backend should
- * answer consistently for both registered and unregistered emails to avoid
- * account enumeration; we leave that policy to the server and only relay
- * its response.
+ * 비밀번호 재설정 1단계 — 6자리 인증번호를 이메일로 발송 요청. Public
+ * endpoint (no auth header needed). 성공은 200 + plain-string message이며
+ * 토스트로 그대로 노출한다. 서버는 미가입/소셜/일반 계정 모두 동일한 성공
+ * 응답을 돌려준다(계정 열거 방지 — 의도적 설계). 클라이언트가 응답으로
+ * 계정 존재 여부를 구분하려 해서는 안 된다.
+ *
+ * rate limit: 이메일당 3회/15분. 초과 시 429 `RATE_LIMIT_EXCEEDED` +
+ * `Retry-After` 헤더 — `getRetryAfterSeconds`로 읽는다.
  */
 export async function findPassword(
   email: string,
@@ -460,6 +542,57 @@ export async function findPassword(
     config,
   );
   return data;
+}
+
+export type PasswordResetVerification = {
+  resetToken: string;
+  expiresInSeconds: number;
+};
+
+/**
+ * 비밀번호 재설정 2단계 — 이메일로 받은 6자리 인증번호 검증. 성공 시
+ * `{ resetToken, expiresInSeconds }`(현재 600초)를 돌려준다. resetToken은
+ * 호출 화면의 메모리에만 두고 어디에도 저장/로그하지 않는다(요청·응답
+ * 로그는 이 모듈의 마스킹 목록이 가린다).
+ *
+ * 실패는 전부 400 `BAD_REQUEST`이며 코드 불일치/만료/시도 초과가 message
+ * 문자열로만 구분된다 — 호출부는 message를 그대로 보여줄 뿐, 문자열로
+ * 분기하지 않는다.
+ */
+export async function verifyPasswordResetCode(
+  email: string,
+  code: string,
+  config?: AxiosRequestConfig,
+): Promise<PasswordResetVerification> {
+  const { data } = await api.post<PasswordResetVerification>(
+    "/api/users/password/find/verify",
+    { email, code },
+    config,
+  );
+  return data;
+}
+
+/**
+ * 비밀번호 재설정 3단계 — resetToken으로 새 비밀번호 확정. 성공은 **204
+ * No Content, body 없음**. newPassword 규칙은 utils/passwordPolicy.ts —
+ * change-password와 완전히 동일한 서버 @Pattern이다.
+ *
+ * 실패: 401 `INVALID_TOKEN`(토큰 만료/이미 사용됨 — 1단계부터 다시),
+ * 400 `INVALID_INPUT`(비밀번호 형식). 이 경로는 비로그인 플로우라 지울
+ * 로컬 세션이 없으며, `/api/users/password/` prefix가 refresh 제외 목록에
+ * 있어 401이 와도 인터셉터가 refresh를 시도하지 않고 원본 에러를 그대로
+ * 던진다.
+ */
+export async function resetPassword(
+  resetToken: string,
+  newPassword: string,
+  config?: AxiosRequestConfig,
+): Promise<void> {
+  await api.post<void>(
+    "/api/users/password/reset",
+    { resetToken, newPassword },
+    config,
+  );
 }
 
 /** Creates a new account. Server returns a plain string message; we don't surface it. */
@@ -484,34 +617,51 @@ export async function getMyInfo(config?: AxiosRequestConfig): Promise<UserInfo> 
 
 /**
  * Updates the current user's password. Meaningful for LOCAL provider only —
- * social accounts have a UUID placeholder server-side. Server returns a
- * plain-string message; callers distinguish success/failure via try/catch.
- * On a wrong current password the backend typically replies 400.
+ * 소셜 계정은 서버의 password 컬럼이 null이라 서버가 400으로 거절한다.
+ *
+ * 성공은 **204 No Content, body 없음**이다. 그리고 서버는 204를 보내기 전에
+ * 같은 트랜잭션에서 해당 유저의 모든 UserSession, Expo Push Token, Password
+ * Reset Token을 삭제한다 — 즉 **204가 도착한 시점에 현재 세션은 이미 서버에서
+ * 사라져 있다**. 호출부는 성공 직후 로컬 세션도 정리해야 한다
+ * (`AuthContext.endLocalSession`). 여기서 토큰을 지우지 않는 이유는, 화면이
+ * 안내 토스트를 띄운 뒤 로그아웃 타이밍을 직접 잡을 수 있게 두기 위해서다.
+ *
+ * 실패는 던진다. 현재 비밀번호 불일치는 401 `INVALID_CREDENTIALS`이며,
+ * 인터셉터가 이 code를 refresh 대상에서 제외하므로 원본 에러가 그대로 온다.
  */
 export async function changePassword(
   currentPassword: string,
   newPassword: string,
   config?: AxiosRequestConfig,
-): Promise<string> {
-  const { data } = await api.patch<string>(
+): Promise<void> {
+  await api.patch<void>(
     "/api/users/me/password",
     { currentPassword, newPassword },
     config,
   );
-  return data;
 }
 
 /**
- * Toggles the global push-notification setting server-side. Backend tracks
- * the boolean state; the request body is empty (toggle semantics). Returns
- * the server's plain-string message.
+ * 서버에 저장된 전체 푸시 수신 설정을 **명시적 값**으로 변경한다.
+ * PATCH /api/users/me/notification-setting, body `{ enabled }` — 서버
+ * NotificationSettingRequest.enabled(@NotNull). "반대로 토글"이 아니라
+ * 원하는 최종 값을 보내므로 연타/재시도에도 멱등이다.
+ *
+ * 성공은 200 + plain-string message("알림 수신이 켜졌습니다." 등).
+ * 이 값은 GET /me의 `isNotificationEnabled`와 같은 컬럼이므로, 성공 후에는
+ * /me 재호출 없이 `AuthContext.setUserNotificationEnabled(enabled)`로 로컬
+ * merge만 하면 된다.
+ *
+ * 일반 인증 API다 — refresh 제외 목록에 넣지 않는다. 401(토큰 만료)이면
+ * 인터셉터가 refresh 후 1회 재시도한다.
  */
 export async function updateNotificationSetting(
+  enabled: boolean,
   config?: AxiosRequestConfig,
 ): Promise<string> {
   const { data } = await api.patch<string>(
     "/api/users/me/notification-setting",
-    undefined,
+    { enabled },
     config,
   );
   return data;

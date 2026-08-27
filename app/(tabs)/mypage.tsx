@@ -7,6 +7,7 @@ import {
   Pressable,
   ScrollView,
   StyleSheet,
+  Switch,
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { useFocusEffect, useRouter } from "expo-router";
@@ -16,9 +17,10 @@ import { useAuth } from "@/context/AuthContext";
 import { useToast } from "@/components/Toast";
 import { ConfirmModal } from "@/components/ConfirmModal";
 import { DeletePasswordModal } from "@/components/DeletePasswordModal";
-import { getErrorMessage } from "@/services/api";
+import { getErrorMessage, updateNotificationSetting } from "@/services/api";
 import { ensurePushTokenRegistered } from "@/services/pushNotifications";
 import { clearRecentIngredients } from "@/services/recentIngredients";
+import { createSubmitGuard } from "@/utils/submitGuard";
 import {
   Colors,
   Spacing,
@@ -30,15 +32,27 @@ import {
 const SHOW_DELETE_ACCOUNT = true;
 
 export default function MyPageScreen() {
-  const { user, logout, logoutAll, deleteAccount } = useAuth();
+  const { user, logout, logoutAll, deleteAccount, setUserNotificationEnabled } =
+    useAuth();
   const { showTopToast } = useToast();
   const router = useRouter();
 
-  // 알림 행은 OS 권한의 거울 — 서버 isNotificationEnabled flag는 제어하지 않는다
-  // (백엔드 기본 true 방치, 종/알림창 히스토리는 권한 무관 항상 저장. 푸시 송신만
-  // OS 권한이 통제). 앱이 권한을 코드로 끌 수 없으므로 행은 "상태 표시 + 설정 앱
-  // 바로가기" 역할만. 매 focus마다 아래 useFocusEffect가 권한을 재확인해 갱신.
+  // "기기 알림" 행은 OS 권한의 거울 — 서버 isNotificationEnabled flag는 제어하지
+  // 않는다 (종/알림창 히스토리는 권한 무관 항상 저장. 푸시 송신은 OS 권한과 서버
+  // flag가 각각 통제). 앱이 권한을 코드로 끌 수 없으므로 행은 "상태 표시 + 설정
+  // 앱 바로가기" 역할만. 매 focus마다 아래 useFocusEffect가 권한을 재확인해 갱신.
+  // 서버 flag는 아래 "푸시 알림 수신" 스위치가 별도로 담당한다.
   const [osPermDenied, setOsPermDenied] = useState(false);
+
+  // 푸시 알림 수신(서버 저장 설정) 스위치.
+  //   표시값: 요청 중에는 낙관값(notifPending), 평소엔 AuthContext user 값.
+  //   성공: setUserNotificationEnabled로 로컬 merge — /me 재호출 없음.
+  //   실패: pending만 걷어내면 user 값(변경 전)으로 자연 rollback.
+  //   가드: submitGuard가 같은 tick 연타의 중복 요청을 동기 차단하고,
+  //         요청 중에는 disabled로 스위치 자체를 잠근다.
+  const notifGuardRef = useRef(createSubmitGuard());
+  const [notifSubmitting, setNotifSubmitting] = useState(false);
+  const [notifPending, setNotifPending] = useState<boolean | null>(null);
 
   // 탈퇴 흐름 — LOCAL은 비번 모달, GOOGLE은 단순 확인 모달.
   const [googleConfirmVisible, setGoogleConfirmVisible] = useState(false);
@@ -69,7 +83,12 @@ export default function MyPageScreen() {
   );
 
   // Backend mixes casing ("LOCAL" / "google") — normalize for comparison.
-  const isGoogleAccount = (user?.provider ?? "").toLowerCase() === "google";
+  // 판정은 부정형("local이 아니면 소셜")이다. 백엔드도 전부
+  // `"LOCAL".equals(provider)` 기준으로 갈라내고, 긍정형("google이면")은 새
+  // 소셜 provider가 붙는 순간 비밀번호 메뉴가 새어나온다. provider를 모를 때는
+  // 숨겨지는 쪽이 안전하다.
+  // NOTE: 아래 provider 표시 텍스트는 아직 소셜 = Google 하나를 가정한다.
+  const isSocialAccount = (user?.provider ?? "").toLowerCase() !== "local";
 
   // 표시명 폴백 체인:
   //   1. 서버 nickname (LOCAL 가입자는 signup-profile에서 입력값, 구글은
@@ -114,6 +133,31 @@ export default function MyPageScreen() {
     }
   };
 
+  // 서버 수신 설정 토글 — "반대로 토글"이 아니라 스위치가 준 최종 값을
+  // 명시적으로 보낸다. OS 권한 로직(handleNotificationRowPress)과는 무관.
+  const serverNotifEnabled = user?.isNotificationEnabled ?? true;
+  const notifDisplayValue = notifPending ?? serverNotifEnabled;
+
+  const handleNotificationSettingToggle = (next: boolean) =>
+    notifGuardRef.current(async () => {
+      setNotifPending(next); // 낙관적 즉시 반영
+      setNotifSubmitting(true);
+      try {
+        await updateNotificationSetting(next);
+        // 같은 컬럼을 /me가 돌려주므로 로컬 merge로 충분 — 재조회 없음.
+        setUserNotificationEnabled(next);
+      } catch (e) {
+        showTopToast({
+          message: getErrorMessage(e, "알림 설정 변경에 실패했어요"),
+          variant: "error",
+        });
+      } finally {
+        // 성공이면 user가 이미 next라 표시 유지, 실패면 변경 전 값으로 rollback.
+        setNotifPending(null);
+        setNotifSubmitting(false);
+      }
+    });
+
   const handleLogout = async () => {
     // 로그아웃은 즉시 로그인 화면으로 전환되므로 toast는 보일 시간이
     // 없음 + 토큰은 이미 정리됨. unhandled rejection만 막는 best-effort.
@@ -153,7 +197,7 @@ export default function MyPageScreen() {
   };
 
   const handleDeleteAccountStart = () => {
-    if (isGoogleAccount) {
+    if (isSocialAccount) {
       setGoogleConfirmVisible(true);
     } else {
       setPasswordModalVisible(true);
@@ -230,12 +274,12 @@ export default function MyPageScreen() {
           )}
           <View style={styles.providerRow}>
             <Ionicons
-              name={isGoogleAccount ? "logo-google" : "mail-outline"}
+              name={isSocialAccount ? "logo-google" : "mail-outline"}
               size={14}
               color={Colors.onSurfaceVariant}
             />
             <Text style={styles.providerText}>
-              {isGoogleAccount ? "Google 계정" : "이메일 가입"}
+              {isSocialAccount ? "Google 계정" : "이메일 가입"}
             </Text>
           </View>
         </View>
@@ -272,8 +316,26 @@ export default function MyPageScreen() {
             </View>
           </Pressable>
 
-          {/* 비밀번호 변경 — LOCAL 계정만. 소셜은 서버측 패스워드가 placeholder. */}
-          {!isGoogleAccount && (
+          <View style={styles.divider} />
+
+          {/* 푸시 알림 수신 — 서버 저장 설정(GET /me의 isNotificationEnabled).
+              OS 권한과 별개로, 서버가 이 계정으로 푸시를 보낼지 여부. */}
+          <View style={styles.menuRow}>
+            <Text style={styles.menuLabel}>푸시 알림 수신</Text>
+            <Switch
+              value={notifDisplayValue}
+              onValueChange={handleNotificationSettingToggle}
+              disabled={notifSubmitting}
+              accessibilityLabel={
+                notifDisplayValue ? "푸시 알림 수신 켜짐" : "푸시 알림 수신 꺼짐"
+              }
+              trackColor={{ true: Colors.primary }}
+            />
+          </View>
+
+          {/* 비밀번호 변경 — LOCAL 계정만. 소셜 계정은 서버의 password 컬럼이
+              null이라 확인할 현재 비밀번호 자체가 없다. */}
+          {!isSocialAccount && (
             <>
               <View style={styles.divider} />
               <Pressable

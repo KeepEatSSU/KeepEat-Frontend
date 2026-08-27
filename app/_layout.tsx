@@ -37,7 +37,8 @@ function AuthGate({ children }: { children: React.ReactNode }) {
     const inAuthGroup =
       segments[0] === "login" ||
       segments[0] === "signup" ||
-      segments[0] === "signup-profile";
+      segments[0] === "signup-profile" ||
+      segments[0] === "find-password";
 
     if (!isAuthenticated && !inAuthGroup) {
       router.replace("/login");
@@ -101,6 +102,10 @@ export default function RootLayout() {
                     />
                     <Stack.Screen
                       name="signup-profile"
+                      options={{ animation: "slide_from_right" }}
+                    />
+                    <Stack.Screen
+                      name="find-password"
                       options={{ animation: "slide_from_right" }}
                     />
                     <Stack.Screen

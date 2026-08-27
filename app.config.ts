@@ -66,7 +66,7 @@ export default ({ config }: ConfigContext): ExpoConfig => {
       ...config.android,
       package: isDemo ? `${productionPackage}.demo` : productionPackage,
       googleServicesFile: isDemo
-        ? process.env.GOOGLE_SERVICES_JSON
+        ? process.env.GOOGLE_SERVICES_JSON || config.android?.googleServicesFile
         : config.android?.googleServicesFile,
     },
     extra: {

@@ -31,7 +31,7 @@
 | `findPassword` | `POST /api/users/password/find` | `{ email }` | plain string |
 | `signUp` | `POST /api/users/signup` | `{ nickname, email, password }` | 성공/실패만 사용 |
 | `getMyInfo` | `GET /api/users/me` | 없음 | `UserInfo` |
-| `changePassword` | `PATCH /api/users/me/password` | `{ currentPassword, newPassword }` | plain string |
+| `changePassword` | `PATCH /api/users/me/password` | `{ currentPassword, newPassword }` | 204 No Content. 서버가 응답 전에 전 세션·푸시 토큰을 폐기하므로 호출부가 `endLocalSession()`으로 로컬 세션도 정리해야 한다 |
 | `updateNotificationSetting` | `PATCH /api/users/me/notification-setting` | body 없음 | plain string |
 | `deleteAccount` | `DELETE /api/users/me` | LOCAL `{ password }`, Google body 없음 | token clear, logout event |
 | `logout` | `POST /api/users/logout` | 없음 | 실패해도 local cleanup |

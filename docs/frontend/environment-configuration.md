@@ -63,8 +63,14 @@ EAS 클라우드 빌드는 Git에서 제외된 `.env`를 읽지 않는다. 원�
 
 여기서 `preview`는 Expo가 제공하는 원격 환경변수 저장소 이름이다. 앱의 Build
 profile과 Update channel 이름은 `demo`다. Android Demo 빌드에서 푸시를 사용하려면
-`.demo` package용 Firebase 파일을 `GOOGLE_SERVICES_JSON` EAS 파일 변수로 별도
-등록한다.
+`google-services.json`에 `.demo` package(`com.anonymous.keepeat_front.demo`)
+client 항목이 포함되어야 한다. Firebase 콘솔에서 같은 프로젝트에 demo package용
+Android 앱을 추가하고 재발급한 파일(두 client 포함)을 레포 루트
+`google-services.json`으로 교체하면 된다. Demo 빌드는
+`GOOGLE_SERVICES_JSON`(EAS 파일 변수 또는 로컬 env)이 지정되면 그 파일을
+우선 사용하고, 없으면 레포 루트 `google-services.json`으로 fallback한다
+(`app.config.ts`). 파일이 있어도 `.demo` client 항목이 없으면 Android 빌드가
+`No matching client found for package name` 오류로 실패한다.
 
 EAS Update runtime은 Demo `1.0.0-demo`, Production `1.0.0`처럼 variant별로
 분리해 서로 다른 앱에 update가 적용되지 않게 한다.
