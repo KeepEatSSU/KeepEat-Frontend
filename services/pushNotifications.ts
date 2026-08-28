@@ -14,6 +14,7 @@ import {
   deletePushToken,
   registerPushToken,
 } from "@/services/notifications";
+import { getErrorStatus } from "@/services/api";
 import { tokenStorage } from "@/services/tokenStorage";
 
 const REGISTRATION_STATE_KEY = "keepeat:pushTokenRegistration";
@@ -94,6 +95,11 @@ export async function registerForPushNotificationsAsync(): Promise<string | null
     if (status !== "granted") {
       // 권한이 없는 상태에선 토큰을 발급하지 않는다. 권한 획득은 사용자가
       // pre-permission 팝업 / 마이페이지 토글에서 명시적으로 시작하는 흐름.
+      // 로그는 release에서도 남긴다 — 이 무로그 return이 "등록이 소리 없이
+      // 빠졌는데 이유를 알 수 없는" 실기 이슈의 관측 불가 지점이었다.
+      console.log(
+        `[pushNotifications] skip: permission not granted (status: ${status})`,
+      );
       return null;
     }
 
@@ -114,10 +120,13 @@ export async function registerForPushNotificationsAsync(): Promise<string | null
 
     const token = await Notifications.getExpoPushTokenAsync({ projectId });
     return token.data;
-  } catch {
-    if (__DEV__) {
-      console.warn("[pushNotifications] Expo push token is unavailable");
-    }
+  } catch (error) {
+    // __DEV__ gate 금지 — release에서 Firebase 미초기화("Default FirebaseApp is
+    // not initialized" 등)로 발급이 실패해도 이 한 줄이 유일한 단서다.
+    // 에러 문자열에는 토큰 값이 실리지 않는다.
+    console.warn(
+      `[pushNotifications] Expo push token is unavailable: ${String(error)}`,
+    );
     return null;
   }
 }
@@ -144,10 +153,17 @@ export async function getExpoPushTokenForLogout(): Promise<string | null> {
 async function runPushTokenRegistration(normalizedUserId: string): Promise<void> {
   try {
     const accessToken = await tokenStorage.getAccessToken();
-    if (!accessToken) return;
+    if (!accessToken) {
+      console.log("[pushNotifications] skip: no access token for registration");
+      return;
+    }
 
     const expoPushToken = await registerForPushNotificationsAsync();
-    if (!expoPushToken) return;
+    if (!expoPushToken) {
+      // 발급 실패 사유(권한/projectId/SDK 오류)는 위 함수가 이미 로그했다.
+      console.log("[pushNotifications] skip: no expo push token issued");
+      return;
+    }
 
     const registrationKey = `${normalizedUserId}\u0000${expoPushToken}`;
     const inFlight = inFlightRegistrations.get(registrationKey);
@@ -159,6 +175,9 @@ async function runPushTokenRegistration(normalizedUserId: string): Promise<void>
         registered?.userId === normalizedUserId &&
         registered.expoPushToken === expoPushToken
       ) {
+        console.log(
+          `[pushNotifications] skip: already registered for user ${normalizedUserId}`,
+        );
         return;
       }
 
@@ -172,10 +191,13 @@ async function runPushTokenRegistration(normalizedUserId: string): Promise<void>
           REGISTRATION_STATE_KEY,
           JSON.stringify(nextState),
         );
-      } catch {
-        if (__DEV__) {
-          console.warn("[pushNotifications] token registration was not completed");
-        }
+        console.log(
+          `[pushNotifications] registered push token for user ${normalizedUserId}`,
+        );
+      } catch (error) {
+        console.warn(
+          `[pushNotifications] token registration was not completed (status: ${getErrorStatus(error) ?? "network"})`,
+        );
       }
     });
     const tracked = operation.finally(() => {
@@ -184,9 +206,12 @@ async function runPushTokenRegistration(normalizedUserId: string): Promise<void>
     inFlightRegistrations.set(registrationKey, tracked);
     registrationQueue = tracked.catch(() => {});
     return tracked;
-  } catch {
+  } catch (error) {
     // SecureStore/token issuance failures are non-blocking and leave no
     // registration metadata, so a later lifecycle trigger can retry.
+    console.warn(
+      `[pushNotifications] registration aborted: ${String(error)}`,
+    );
   }
 }
 
@@ -237,17 +262,15 @@ export async function clearPushTokenOnServer(): Promise<void> {
   try {
     const token = await registerForPushNotificationsAsync();
     if (token) await deletePushToken(token);
-  } catch {
-    if (__DEV__) {
-      console.warn("[pushNotifications] server deregistration failed");
-    }
+  } catch (error) {
+    console.warn(
+      `[pushNotifications] server deregistration failed (status: ${getErrorStatus(error) ?? "network"})`,
+    );
   } finally {
     try {
       await clearPushTokenRegistrationState();
     } catch {
-      if (__DEV__) {
-        console.warn("[pushNotifications] local registration cleanup failed");
-      }
+      console.warn("[pushNotifications] local registration cleanup failed");
     }
   }
 }
