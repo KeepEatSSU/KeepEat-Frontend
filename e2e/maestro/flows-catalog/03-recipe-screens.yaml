@@ -1,0 +1,39 @@
+# 카탈로그 03 — 레시피 탭 / 내 레시피 목록 / 레시피 상세 캡처 (조회만).
+# 전제: 테스트 계정의 내 레시피에 레시피가 1개 이상 있다 (README 참고).
+# 카드의 좋아요/싫어요는 tap 하지 않는다 (반응 토글 = 서버 상태 변형).
+appId: com.anonymous.keepeat_front.demo
+---
+- launchApp
+- runFlow: ../common/ensure-logged-in.yaml
+# 레시피 탭 (전체 레시피 목록)
+- tapOn:
+    text: "레시피"
+- extendedWaitUntil:
+    visible:
+      id: "recipe-list.card"
+    timeout: 20000
+# 캡처: 레시피 탭 목록
+- takeScreenshot: ${SCREENSHOT_DIR}/recipe-list
+# 내 레시피 탭
+- tapOn:
+    text: "내 레시피"
+- extendedWaitUntil:
+    visible:
+      id: "recipe-list.card"
+    timeout: 20000
+# 캡처: 내 레시피 목록
+- takeScreenshot: ${SCREENSHOT_DIR}/my-recipes
+# 첫 번째 카드 → 레시피 상세 (조회만; 요리 시작/제거는 누르지 않는다)
+- tapOn:
+    id: "recipe-list.card"
+- extendedWaitUntil:
+    visible:
+      text: "조리 순서"
+    timeout: 20000
+# 캡처: 레시피 상세
+- takeScreenshot: ${SCREENSHOT_DIR}/recipe-detail
+- back
+- extendedWaitUntil:
+    visible:
+      id: "recipe-list.card"
+    timeout: 10000

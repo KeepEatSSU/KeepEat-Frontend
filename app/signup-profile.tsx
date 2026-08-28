@@ -201,6 +201,7 @@ export default function SignupProfileScreen() {
                   placeholder="어떻게 불러드릴까요?"
                   placeholderTextColor={Colors.outline}
                   style={styles.input}
+                  testID="signup-profile.nickname.input"
                   returnKeyType="next"
                   onSubmitEditing={() => passwordRef.current?.focus()}
                 />
@@ -224,6 +225,7 @@ export default function SignupProfileScreen() {
                   placeholder="비밀번호"
                   placeholderTextColor={Colors.outline}
                   style={styles.input}
+                  testID="signup-profile.password.input"
                   secureTextEntry={!showPassword}
                   returnKeyType="next"
                   onSubmitEditing={() => passwordConfirmRef.current?.focus()}
@@ -291,6 +293,7 @@ export default function SignupProfileScreen() {
                   placeholder="비밀번호 다시 입력"
                   placeholderTextColor={Colors.outline}
                   style={styles.input}
+                  testID="signup-profile.password-confirm.input"
                   secureTextEntry={!showPasswordConfirm}
                   returnKeyType="done"
                   onSubmitEditing={handleSignup}

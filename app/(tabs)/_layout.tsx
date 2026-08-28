@@ -73,6 +73,7 @@ function FloatingTabBar({
               <Pressable
                 key={route.key}
                 onPress={onFabPress}
+                testID="tabbar.add-button"
                 style={({ pressed }) => [
                   styles.fab,
                   pressed && styles.fabPressed,

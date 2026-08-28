@@ -7,6 +7,8 @@ appId: com.anonymous.keepeat_front.demo
     visible:
       id: "login.email.input"
     timeout: 20000
+# 카탈로그: 로그인 화면 (입력 전 초기 상태)
+- takeScreenshot: ${SCREENSHOT_DIR}/login
 - tapOn:
     id: "login.email.input"
 - inputText: ${TEST_EMAIL}

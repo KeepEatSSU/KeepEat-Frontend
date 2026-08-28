@@ -136,6 +136,7 @@ export function AddMenuSheet({
               {MENU_ITEMS.map((item) => (
                 <Pressable
                   key={item.key}
+                  testID={`add-menu.${item.key}-button`}
                   onPress={() => handleMenuPress(actions[item.action])}
                   style={({ pressed }) => [
                     styles.menuItem,

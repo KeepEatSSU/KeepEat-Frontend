@@ -237,6 +237,7 @@ export default function ChangePasswordScreen() {
                   placeholder="현재 비밀번호"
                   placeholderTextColor={Colors.outline}
                   style={styles.input}
+                  testID="change-password.current.input"
                   secureTextEntry={!showCurrent}
                   maxLength={CURRENT_PW_MAX_LENGTH}
                   returnKeyType="next"
@@ -275,6 +276,7 @@ export default function ChangePasswordScreen() {
                   placeholder="새 비밀번호"
                   placeholderTextColor={Colors.outline}
                   style={styles.input}
+                  testID="change-password.new.input"
                   secureTextEntry={!showNew}
                   returnKeyType="next"
                   onSubmitEditing={() => confirmRef.current?.focus()}
@@ -359,6 +361,7 @@ export default function ChangePasswordScreen() {
                   placeholder="새 비밀번호 다시 입력"
                   placeholderTextColor={Colors.outline}
                   style={styles.input}
+                  testID="change-password.confirm.input"
                   secureTextEntry={!showConfirm}
                   returnKeyType="done"
                   onSubmitEditing={handleSubmit}

@@ -1,0 +1,66 @@
+# 카탈로그 02 — 재료 상세 + 추가 진입 화면 캡처 (수정/등록/삭제 없음).
+# 상세는 아무것도 수정하지 않으므로 뒤로가기 시 저장 모달 없이 바로 닫힌다.
+# add-confirm(수동 입력)도 입력 없이 뒤로가기만 — 등록 API 호출 없음.
+appId: com.anonymous.keepeat_front.demo
+---
+- launchApp
+- runFlow: ../common/ensure-logged-in.yaml
+- tapOn:
+    text: "냉장고"
+- extendedWaitUntil:
+    notVisible:
+      text: "냉장고 문을 여는 중..."
+    timeout: 20000
+- extendedWaitUntil:
+    visible:
+      id: "home.ingredient-card"
+    timeout: 10000
+# 첫 번째 재료 카드 → 상세 (조회만)
+- tapOn:
+    id: "home.ingredient-card"
+- extendedWaitUntil:
+    visible:
+      text: "소비기한"
+    timeout: 10000
+# 캡처: 재료 상세
+- takeScreenshot: ${SCREENSHOT_DIR}/ingredient-detail
+# 수정 없음 → 하드웨어 뒤로가기가 바로 닫는다 (dirty 아님)
+- back
+- extendedWaitUntil:
+    visible:
+      id: "home.ingredient-card"
+    timeout: 10000
+# FAB → 추가 메뉴 시트
+- tapOn:
+    id: "tabbar.add-button"
+- extendedWaitUntil:
+    visible:
+      text: "수동 입력"
+    timeout: 5000
+# 캡처: 추가 메뉴 시트 (갤러리/카메라/수동)
+- takeScreenshot: ${SCREENSHOT_DIR}/add-menu
+# 수동 입력 → add-confirm 진입. manual 모드는 식재료 선택 피커 시트를
+# 자동으로 먼저 연다 — 피커부터 캡처하고 닫은 뒤 등록 화면을 캡처한다.
+- tapOn:
+    text: "수동 입력"
+- extendedWaitUntil:
+    visible:
+      id: "ingredient-picker.sheet.root"
+    timeout: 10000
+# 캡처: 식재료 선택 피커
+- takeScreenshot: ${SCREENSHOT_DIR}/ingredient-picker
+# 피커 닫기 → 빈 draft 카드가 있는 등록 화면 (선택/입력/제출 없음)
+- tapOn:
+    id: "ingredient-picker.close-button"
+- extendedWaitUntil:
+    visible:
+      text: "구매일자"
+    timeout: 10000
+# 캡처: 수동 등록 진입 화면
+- takeScreenshot: ${SCREENSHOT_DIR}/add-manual
+# 입력 없이 뒤로 → 홈 복귀 (add-confirm 은 뒤로가기 가로채기 없음)
+- back
+- extendedWaitUntil:
+    visible:
+      id: "home.ingredient-card"
+    timeout: 10000

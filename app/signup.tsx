@@ -181,6 +181,7 @@ export default function SignupScreen() {
                   placeholder="example@email.com"
                   placeholderTextColor={Colors.outline}
                   style={styles.input}
+                  testID="signup.email.input"
                   keyboardType="email-address"
                   autoCapitalize="none"
                   autoCorrect={false}

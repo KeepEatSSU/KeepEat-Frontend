@@ -16,3 +16,5 @@ appId: com.anonymous.keepeat_front.demo
 # 이메일 가입 테스트 계정이므로 로그인에 쓴 이메일이 그대로 표시되어야 한다
 - assertVisible:
     text: ${TEST_EMAIL}
+# 카탈로그: 마이페이지
+- takeScreenshot: ${SCREENSHOT_DIR}/mypage

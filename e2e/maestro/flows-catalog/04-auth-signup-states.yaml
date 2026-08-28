@@ -1,0 +1,100 @@
+# 카탈로그 04 — 로그아웃 상태가 필요한 화면/에러 상태 캡처.
+# clearState 로 시작하므로 카탈로그 flow 중 마지막에 두어 01~03 이 기존
+# 세션을 재사용하게 한다. 이 flow 가 끝나면 앱은 로그아웃 상태다.
+#
+# 캡처 상태:
+#   login-error        — 잘못된 형식 이메일 제출 → 서버 400
+#                        "올바른 이메일 형식이 아닙니다." 인라인 에러.
+#                        (로그인 시도 1회 소모 — rate limit 10회/15분 내)
+#   signup-step1       — 회원가입 1단계 (이메일 인증 화면, 제출 안 함)
+#   signup-email-error — 1단계 이메일 형식 인라인 에러
+#   signup-step2       — 회원가입 2단계. 정상 경로는 실제 이메일 인증이
+#                        필요하므로 deep link 로 화면만 연다 (클라이언트
+#                        라우팅일 뿐 서버 호출 없음). 가입하기는 누르지 않는다.
+#   signup-validation  — 2단계 조건 미달 비밀번호 → 체크리스트 미충족 +
+#                        확인 불일치 빨간 에러 (제출 안 함)
+appId: com.anonymous.keepeat_front.demo
+---
+- launchApp:
+    clearState: true
+- extendedWaitUntil:
+    visible:
+      id: "login.email.input"
+    timeout: 20000
+# ── login-error: 형식이 아닌 이메일 제출 → 서버 400 인라인 에러 ──
+- tapOn:
+    id: "login.email.input"
+- inputText: "not-an-email"
+- hideKeyboard
+- tapOn:
+    id: "login.password.input"
+- inputText: "wrong-password-1!"
+- hideKeyboard
+- tapOn:
+    id: "login.submit-button"
+- extendedWaitUntil:
+    visible:
+      text: "올바른 이메일 형식이 아닙니다."
+    timeout: 10000
+- takeScreenshot: ${SCREENSHOT_DIR}/login-error
+# ── signup 1단계 ──
+- tapOn:
+    text: "이메일로 회원가입"
+- extendedWaitUntil:
+    visible:
+      id: "signup.email.input"
+    timeout: 10000
+- takeScreenshot: ${SCREENSHOT_DIR}/signup-step1
+- tapOn:
+    id: "signup.email.input"
+- inputText: "not-an-email"
+- hideKeyboard
+- extendedWaitUntil:
+    visible:
+      text: "올바른 이메일 형식을 입력하세요"
+    timeout: 5000
+- takeScreenshot: ${SCREENSHOT_DIR}/signup-email-error
+# 1단계 인증번호는 전송하지 않는다 (실제 메일 발송 + rate limit 소모) → 뒤로
+- back
+- extendedWaitUntil:
+    visible:
+      id: "login.email.input"
+    timeout: 10000
+# ── signup 2단계: deep link 진입 (비로그인 상태에서만 AuthGate 통과) ──
+- openLink: keepeat-demo://signup-profile?email=catalog@example.com
+- extendedWaitUntil:
+    visible:
+      id: "signup-profile.password.input"
+    timeout: 10000
+- takeScreenshot: ${SCREENSHOT_DIR}/signup-step2
+# 조건 미달 비밀번호 + 확인 불일치 → validation 상태 (가입하기는 disabled)
+# (닉네임은 ASCII만 — maestro inputText 는 한글 미지원)
+- tapOn:
+    id: "signup-profile.nickname.input"
+- inputText: "catalog-user"
+- tapOn:
+    id: "signup-profile.password.input"
+- inputText: "abc"
+# 키보드가 확인 필드를 가리므로 내리고 나서 탭한다
+- hideKeyboard
+- tapOn:
+    id: "signup-profile.password-confirm.input"
+- inputText: "abcd"
+- hideKeyboard
+- extendedWaitUntil:
+    visible:
+      text: "비밀번호가 일치하지 않아요"
+    timeout: 5000
+- takeScreenshot: ${SCREENSHOT_DIR}/signup-validation
+# 뒤로가기 → "가입을 그만두시겠어요?" 모달 → 그만두기 → 로그인 화면
+- back
+- extendedWaitUntil:
+    visible:
+      text: "그만두기"
+    timeout: 5000
+- tapOn:
+    text: "그만두기"
+- extendedWaitUntil:
+    visible:
+      id: "login.email.input"
+    timeout: 10000

@@ -106,6 +106,7 @@ function IngredientGridCard({
       onPress={handlePress}
       onLongPress={handleLongPress}
       delayLongPress={280}
+      testID="home.ingredient-card"
       accessibilityLabel={item.name}
       accessibilityState={{ selected: selectMode && isSelected }}
       style={({ pressed }) => [

@@ -55,6 +55,7 @@ export function RecipeListCard({ item, onPress, onReact, onLongPress }: Props) {
       onPress={onPress}
       onLongPress={onLongPress}
       delayLongPress={onLongPress ? 320 : undefined}
+      testID="recipe-list.card"
       style={({ pressed }) => [styles.card, pressed && styles.cardPressed]}
     >
       <Text style={styles.cardTitle} numberOfLines={2}>
