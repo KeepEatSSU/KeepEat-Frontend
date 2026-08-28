@@ -29,12 +29,20 @@ import {
   Shadows,
   Spacing,
 } from "@/constants/theme";
+import {
+  PW_ALLOWED_CHARSET_REGEX,
+  PW_ALLOWED_SPECIALS,
+  PW_HAS_DIGIT_REGEX,
+  PW_HAS_LETTER_REGEX,
+  PW_HAS_SPECIAL_REGEX,
+  PW_LENGTH_REGEX,
+} from "@/utils/passwordPolicy";
 
 // ─── Validation ───────────────────────────────────────────────────────────────
-
-const PW_LENGTH_REGEX = /^.{8,15}$/;
-const PW_COMPLEXITY_REGEX =
-  /^(?=.*[a-zA-Z])(?=.*\d)(?=.*[!@#$%^&*()_+\-=[\]{};':"\\|,.<>/?]).+$/;
+// 비밀번호 규칙은 utils/passwordPolicy.ts 단일 기준 — 서버 SignUpRequest의
+// @Pattern은 change/reset과 문자 단위로 동일하다. 인라인 정규식(허용 특수문자
+// 집합이 서버보다 넓고 화이트리스트 검사 없음)은 "체크리스트는 초록인데
+// 서버는 400"을 만들었으므로 재도입 금지.
 
 // ─── Screen ───────────────────────────────────────────────────────────────────
 // Step 2 of signup: nickname + password, with the verified email coming in as
@@ -71,14 +79,23 @@ export default function SignupProfileScreen() {
   const [leaveModalVisible, setLeaveModalVisible] = useState(false);
 
   const isPwLengthOk = PW_LENGTH_REGEX.test(password);
-  const isPwComplexOk = PW_COMPLEXITY_REGEX.test(password);
+  const isPwComplexOk =
+    PW_HAS_LETTER_REGEX.test(password) &&
+    PW_HAS_DIGIT_REGEX.test(password) &&
+    PW_HAS_SPECIAL_REGEX.test(password);
+  const isPwCharsetOk = PW_ALLOWED_CHARSET_REGEX.test(password);
   const isPwMatch =
     passwordConfirm.length > 0 && password === passwordConfirm;
   const showPwMismatch =
     passwordConfirm.length > 0 && password !== passwordConfirm;
   const isNicknameValid = nickname.trim().length > 0;
   const canSubmit =
-    isNicknameValid && isPwLengthOk && isPwComplexOk && isPwMatch && !submitting;
+    isNicknameValid &&
+    isPwLengthOk &&
+    isPwComplexOk &&
+    isPwCharsetOk &&
+    isPwMatch &&
+    !submitting;
 
   // 안드 하드웨어 뒤로가기 가로채기 — 헤더 ←와 동일하게 leave 모달로 라우팅.
   // 모달이 열려있을 땐 가로채지 않아 모달 자체의 onRequestClose 기본 동작
@@ -270,10 +287,19 @@ export default function SignupProfileScreen() {
                       isPwComplexOk && styles.checkTextPass,
                     ]}
                   >
-                    영문, 숫자, 특수기호 포함
+                    {`영문, 숫자, 특수기호(${PW_ALLOWED_SPECIALS}) 포함`}
                   </Text>
                 </View>
               </View>
+
+              {/* change-password.tsx와 동일한 패턴 — 서버 화이트리스트 밖의
+                  문자는 체크리스트로 표현할 수 없으므로(길이·구성은 통과하는데
+                  문자 하나 때문에 400) 위반 시에만 필드 에러로 짚어준다. */}
+              {!isPwCharsetOk && (
+                <Text style={styles.fieldError}>
+                  {`영문, 숫자와 특수기호 ${PW_ALLOWED_SPECIALS} 만 사용할 수 있어요`}
+                </Text>
+              )}
             </View>
 
             {/* Password confirm */}
