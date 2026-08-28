@@ -28,6 +28,7 @@ import {
   searchIngredients,
 } from "@/services/userIngredients";
 import { getErrorMessage } from "@/services/api";
+import { useAuth } from "@/context/AuthContext";
 import { useIngredientMaster } from "@/context/IngredientMasterContext";
 import { getDDayBadgeColor, getDDayInfo } from "@/utils/dateUtils";
 import { Ionicons } from "@expo/vector-icons";
@@ -273,6 +274,7 @@ const gridStyles = StyleSheet.create({
 export default function FridgeScreen() {
   const insets = useSafeAreaInsets();
   const { showTopToast } = useToast();
+  const { isAuthenticated } = useAuth();
   const { snapshot } = useIngredientMaster();
 
   // ── Async data state ──
@@ -521,10 +523,18 @@ export default function FridgeScreen() {
 
   // Refetch every time the home tab is focused (covers post-add, post-edit,
   // post-delete flows without a separate event bus).
+  //
+  // isAuthenticated gate: 로그아웃 상태로 앱을 재시작하면 (tabs)/index가
+  // 초기 라우트로 한 커밋 동안 mount·focus되고, AuthGate의 /login replace는
+  // 부모 effect라 자식 focus effect보다 늦게 돈다 — gate 없이는 무인증
+  // GET /api/v1/user-ingredients 1회가 401을 맞고 refresh 시도까지 유발한다.
+  // 로그인 경로에선 setUser가 네비게이션보다 먼저라 mount 시점에 이미
+  // true이고, 재로그인 등으로 focus 중 값이 바뀌면 deps가 refetch를 돌린다.
   useFocusEffect(
     useCallback(() => {
+      if (!isAuthenticated) return;
       fetchFridgeData();
-    }, [fetchFridgeData]),
+    }, [isAuthenticated, fetchFridgeData]),
   );
 
   // Server-side search with 300ms debounce. Empty query → fall back to the
