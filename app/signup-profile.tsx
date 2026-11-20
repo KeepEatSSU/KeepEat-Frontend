@@ -16,10 +16,12 @@ import {
 import { useLocalSearchParams, useRouter } from "expo-router";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { Ionicons } from "@expo/vector-icons";
+import * as WebBrowser from "expo-web-browser";
 import { useToast } from "@/components/Toast";
 import { useAuth } from "@/context/AuthContext";
 import { ConfirmModal } from "@/components/ConfirmModal";
 import { getErrorMessage } from "@/services/api";
+import { LEGAL_URLS } from "@/constants/config";
 import {
   Colors,
   FontSize,
@@ -43,6 +45,22 @@ import {
 // @Pattern은 change/reset과 문자 단위로 동일하다. 인라인 정규식(허용 특수문자
 // 집합이 서버보다 넓고 화이트리스트 검사 없음)은 "체크리스트는 초록인데
 // 서버는 400"을 만들었으므로 재도입 금지.
+
+// ─── Consent ──────────────────────────────────────────────────────────────────
+// 계정이 실제로 만들어지는 곳이 이 화면의 signUp()이므로 필수 동의도 여기서
+// 받는다. 두 항목 모두 필수라 하나라도 빠지면 가입 버튼이 비활성화된다.
+// 동의 여부는 현재 서버 SignUpRequest에 필드가 없어 전송하지 않는다(확인 필요).
+
+type ConsentKey = "terms" | "privacy";
+
+const CONSENT_ITEMS: {
+  key: ConsentKey;
+  label: string;
+  url?: string;
+}[] = [
+  { key: "terms", label: "이용약관 동의", url: LEGAL_URLS.terms },
+  { key: "privacy", label: "개인정보 처리방침 확인", url: LEGAL_URLS.privacy },
+];
 
 // ─── Screen ───────────────────────────────────────────────────────────────────
 // Step 2 of signup: nickname + password, with the verified email coming in as
@@ -77,6 +95,21 @@ export default function SignupProfileScreen() {
   // 가입 그만두기 확인 팝업 — 헤더 ← 와 안드 하드웨어 뒤로가기 양쪽에서
   // 띄움. 확인 시 router.replace("/login")으로 스택 깔끔 정리.
   const [leaveModalVisible, setLeaveModalVisible] = useState(false);
+  const [consents, setConsents] = useState<Record<ConsentKey, boolean>>({
+    terms: false,
+    privacy: false,
+  });
+  const allConsented = consents.terms && consents.privacy;
+
+  const toggleConsent = (key: ConsentKey) =>
+    setConsents((prev) => ({ ...prev, [key]: !prev[key] }));
+
+  const openLegalDocument = (url: string) => {
+    Keyboard.dismiss();
+    WebBrowser.openBrowserAsync(url).catch(() => {
+      showTopToast({ message: "문서를 열 수 없어요", variant: "error" });
+    });
+  };
 
   const isPwLengthOk = PW_LENGTH_REGEX.test(password);
   const isPwComplexOk =
@@ -95,6 +128,7 @@ export default function SignupProfileScreen() {
     isPwComplexOk &&
     isPwCharsetOk &&
     isPwMatch &&
+    allConsented &&
     !submitting;
 
   // 안드 하드웨어 뒤로가기 가로채기 — 헤더 ←와 동일하게 leave 모달로 라우팅.
@@ -343,6 +377,51 @@ export default function SignupProfileScreen() {
               )}
             </View>
 
+            {/* 필수 동의 — 두 항목 모두 체크해야 가입 버튼이 활성화된다. */}
+            <View style={styles.consentList}>
+              {CONSENT_ITEMS.map((item) => {
+                const checked = consents[item.key];
+                return (
+                  <View key={item.key} style={styles.consentRow}>
+                    <Pressable
+                      onPress={() => toggleConsent(item.key)}
+                      testID={`signup-profile.consent-${item.key}.checkbox`}
+                      accessibilityRole="checkbox"
+                      accessibilityState={{ checked }}
+                      accessibilityLabel={`필수, ${item.label}`}
+                      hitSlop={4}
+                      style={({ pressed }) => [
+                        styles.consentToggle,
+                        pressed && { opacity: 0.6 },
+                      ]}
+                    >
+                      <Ionicons
+                        name={checked ? "checkbox" : "square-outline"}
+                        size={20}
+                        color={checked ? Colors.primary : Colors.outline}
+                      />
+                      <Text style={styles.consentText}>
+                        <Text style={styles.consentRequired}>[필수] </Text>
+                        {item.label}
+                      </Text>
+                    </Pressable>
+                    {item.url && (
+                      <Pressable
+                        onPress={() => openLegalDocument(item.url!)}
+                        testID={`signup-profile.consent-${item.key}.link`}
+                        accessibilityRole="link"
+                        accessibilityLabel={`${item.label} 문서 보기`}
+                        hitSlop={8}
+                        style={({ pressed }) => pressed && { opacity: 0.6 }}
+                      >
+                        <Text style={styles.consentLink}>보기</Text>
+                      </Pressable>
+                    )}
+                  </View>
+                );
+              })}
+            </View>
+
             {submitError !== "" && (
               <View style={styles.submitErrorRow}>
                 <Ionicons
@@ -358,6 +437,9 @@ export default function SignupProfileScreen() {
             <Pressable
               onPress={handleSignup}
               disabled={!canSubmit}
+              testID="signup-profile.submit-button"
+              accessibilityRole="button"
+              accessibilityState={{ disabled: !canSubmit }}
               style={({ pressed }) => [
                 styles.primaryBtn,
                 !canSubmit && styles.primaryBtnDisabled,
@@ -516,6 +598,38 @@ const styles = StyleSheet.create({
     fontWeight: FontWeight.medium,
     color: Colors.error,
     marginTop: Spacing.xs,
+  },
+
+  // Consent
+  consentList: {
+    gap: Spacing.md,
+  },
+  consentRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: Spacing.sm,
+  },
+  consentToggle: {
+    flex: 1,
+    flexDirection: "row",
+    alignItems: "center",
+    gap: Spacing.sm,
+  },
+  consentText: {
+    flexShrink: 1,
+    fontSize: FontSize.bodyMd,
+    fontWeight: FontWeight.medium,
+    color: Colors.onSurface,
+  },
+  consentRequired: {
+    color: Colors.primary,
+    fontWeight: FontWeight.semiBold,
+  },
+  consentLink: {
+    fontSize: FontSize.bodySm,
+    fontWeight: FontWeight.medium,
+    color: Colors.outline,
+    textDecorationLine: "underline",
   },
 
   // Submit error

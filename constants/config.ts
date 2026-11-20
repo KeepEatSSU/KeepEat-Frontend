@@ -42,3 +42,12 @@ export const API_TIMEOUT_MS = 15_000;
 // Even when `true`, the bypass is also gated on `__DEV__` at the call site,
 // so a release build can never authenticate against the mock.
 export const DEV_BYPASS_AUTH = false;
+
+// ─── Legal documents ─────────────────────────────────────────────────────────
+// 가입 동의 화면과 마이페이지에서 여는 약관·처리방침 주소. 환경별로 다르지
+// 않으므로 env var가 아니라 상수로 둔다.
+// TODO: 공개 호스팅 주소가 정해지면 교체한다 (backend/docs/legal 문서를 GitHub Pages 등으로 공개 예정)
+export const LEGAL_URLS = {
+  terms: "https://keepeat.example/terms-of-service.html",
+  privacy: "https://keepeat.example/privacy-policy.html",
+} as const;

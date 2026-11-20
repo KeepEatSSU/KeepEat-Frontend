@@ -13,6 +13,8 @@ import { SafeAreaView } from "react-native-safe-area-context";
 import { useFocusEffect, useRouter } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
 import * as Notifications from "expo-notifications";
+import * as WebBrowser from "expo-web-browser";
+import { LEGAL_URLS } from "@/constants/config";
 import { useAuth } from "@/context/AuthContext";
 import { useToast } from "@/components/Toast";
 import { ConfirmModal } from "@/components/ConfirmModal";
@@ -102,6 +104,12 @@ export default function MyPageScreen() {
   const openOsSettings = () => {
     Linking.openSettings().catch(() => {
       showTopToast({ message: "설정 앱을 열 수 없어요", variant: "error" });
+    });
+  };
+
+  const openLegalDocument = (url: string) => {
+    WebBrowser.openBrowserAsync(url).catch(() => {
+      showTopToast({ message: "문서를 열 수 없어요", variant: "error" });
     });
   };
 
@@ -363,6 +371,39 @@ export default function MyPageScreen() {
               </Pressable>
             </>
           )}
+        </View>
+
+        {/* 약관·정책 카드 — 앱 안 브라우저로 공개 문서를 연다. */}
+        <View style={styles.card}>
+          <Pressable
+            onPress={() => openLegalDocument(LEGAL_URLS.terms)}
+            testID="mypage.terms.row"
+            accessibilityRole="link"
+            accessibilityLabel="이용약관 보기"
+            style={({ pressed }) => [
+              styles.menuRow,
+              pressed && { opacity: 0.6 },
+            ]}
+          >
+            <Text style={styles.menuLabel}>이용약관</Text>
+            <Ionicons name="chevron-forward" size={16} color={Colors.outline} />
+          </Pressable>
+
+          <View style={styles.divider} />
+
+          <Pressable
+            onPress={() => openLegalDocument(LEGAL_URLS.privacy)}
+            testID="mypage.privacy.row"
+            accessibilityRole="link"
+            accessibilityLabel="개인정보 처리방침 보기"
+            style={({ pressed }) => [
+              styles.menuRow,
+              pressed && { opacity: 0.6 },
+            ]}
+          >
+            <Text style={styles.menuLabel}>개인정보 처리방침</Text>
+            <Ionicons name="chevron-forward" size={16} color={Colors.outline} />
+          </Pressable>
         </View>
 
         {/* 로그아웃 */}
