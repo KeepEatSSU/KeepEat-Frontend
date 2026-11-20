@@ -73,6 +73,10 @@
 
 - nickname, password, password confirm을 입력한다.
 - 비밀번호 길이/복잡도/일치 여부를 클라이언트에서 검사한다.
+- 필수 동의 2개([필수] 이용약관 동의 / [필수] 개인정보 처리방침 확인)를
+  모두 체크해야 가입 버튼이 활성화된다. 약관·처리방침 "보기"는
+  `constants/config.ts`의 `LEGAL_URLS`를 `WebBrowser.openBrowserAsync()`로 연다.
+  동의 여부는 서버 `SignUpRequest`에 필드가 없어 전송하지 않는다.
 - `signUp(email, password, nickname)` 호출 후 성공 시 `/(tabs)`로 이동한다.
 
 ## Google OAuth
@@ -94,6 +98,7 @@
 - 사용자 표시명은 nickname, 이메일 local-part 순으로 fallback한다.
 - provider가 `google`이면 Google 계정으로 표시한다.
 - 알림 행은 서버 설정이 아니라 OS 권한 상태를 반영한다.
+- 이용약관, 개인정보 처리방침 행은 `LEGAL_URLS`를 앱 안 브라우저로 연다.
 - 로그아웃은 `AuthContext.logout()`을 호출한다.
 - 탈퇴는 provider에 따라 Google 확인 모달 또는 LOCAL 비밀번호 모달을 사용한다.
 - 탈퇴 성공 후 최근 검색 캐시를 삭제한다.
@@ -121,6 +126,12 @@
   - 400/500/네트워크: 서버 `message` 우선, 없으면 폴백 문구.
 
 ## TODO / 확인 필요
+
+- `LEGAL_URLS`는 placeholder(`keepeat.example`)다. 공개 호스팅 주소가 정해지면 교체.
+- Google 첫 로그인은 백엔드 `CustomOAuth2UserService.loadUser()`가 OAuth 콜백
+  안에서 계정을 바로 만들고, 교환 응답(`TokenResponse`)에 신규 가입 여부가 없어
+  프론트에서 가입 전 동의를 받을 단계가 없다. 서버 흐름 변경이 필요하다.
+- 동의 일시/버전을 서버에 저장할지 결정 필요.
 
 - 회원가입(`app/signup-profile.tsx`)의 비밀번호 regex는 아직 서버
   `SignUpRequest` 규칙과 대조하지 않았다. 확인 필요.

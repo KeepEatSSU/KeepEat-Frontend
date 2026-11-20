@@ -24,6 +24,10 @@ rg -n "testID|accessibilityLabel|accessibilityRole" app components -g "*.tsx"
 | `ingredient-picker.close-button` | `components/IngredientPickerSheet.tsx` | 식재료 선택 시트 닫기 버튼. 닫기 흐름 확인용. |
 | `ingredient-picker.custom-add.button` | `components/IngredientPickerSheet.tsx` | 검색 결과가 없을 때 표시되는 직접 추가 버튼. 직접 추가 상태 전환 진입점. |
 | `ingredient-registration.custom-name.input` | `components/IngredientEditCard.tsx` | 직접 추가 전환 후 표시되는 커스텀 재료명 입력 영역. |
+| `signup-profile.consent-{terms,privacy}.checkbox` | `app/signup-profile.tsx` | 가입 필수 동의 체크박스. |
+| `signup-profile.consent-{terms,privacy}.link` | `app/signup-profile.tsx` | 약관·처리방침 문서 열기. |
+| `signup-profile.submit-button` | `app/signup-profile.tsx` | 가입하기 버튼. 필수 동의 전에는 disabled. |
+| `mypage.terms.row`, `mypage.privacy.row` | `app/(tabs)/mypage.tsx` | 마이페이지 이용약관·개인정보 처리방침 행. |
 
 ## 접근성 라벨이 확인된 예
 
