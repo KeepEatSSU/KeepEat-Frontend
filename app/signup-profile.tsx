@@ -22,6 +22,7 @@ import { useAuth } from "@/context/AuthContext";
 import { ConfirmModal } from "@/components/ConfirmModal";
 import { getErrorMessage } from "@/services/api";
 import { LEGAL_URLS } from "@/constants/config";
+import { webKeyActivation } from "@/utils/webKeyActivation";
 import {
   Colors,
   FontSize,
@@ -385,6 +386,7 @@ export default function SignupProfileScreen() {
                   <View key={item.key} style={styles.consentRow}>
                     <Pressable
                       onPress={() => toggleConsent(item.key)}
+                      {...webKeyActivation([" "], () => toggleConsent(item.key))}
                       testID={`signup-profile.consent-${item.key}.checkbox`}
                       accessibilityRole="checkbox"
                       accessibilityState={{ checked }}
@@ -408,6 +410,9 @@ export default function SignupProfileScreen() {
                     {item.url && (
                       <Pressable
                         onPress={() => openLegalDocument(item.url!)}
+                        {...webKeyActivation(["Enter"], () =>
+                          openLegalDocument(item.url!),
+                        )}
                         testID={`signup-profile.consent-${item.key}.link`}
                         accessibilityRole="link"
                         accessibilityLabel={`${item.label} 문서 보기`}

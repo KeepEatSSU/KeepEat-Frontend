@@ -23,6 +23,7 @@ import { getErrorMessage, updateNotificationSetting } from "@/services/api";
 import { ensurePushTokenRegistered } from "@/services/pushNotifications";
 import { clearRecentIngredients } from "@/services/recentIngredients";
 import { createSubmitGuard } from "@/utils/submitGuard";
+import { webKeyActivation } from "@/utils/webKeyActivation";
 import {
   Colors,
   Spacing,
@@ -377,6 +378,9 @@ export default function MyPageScreen() {
         <View style={styles.card}>
           <Pressable
             onPress={() => openLegalDocument(LEGAL_URLS.terms)}
+            {...webKeyActivation(["Enter"], () =>
+              openLegalDocument(LEGAL_URLS.terms),
+            )}
             testID="mypage.terms.row"
             accessibilityRole="link"
             accessibilityLabel="이용약관 보기"
@@ -393,6 +397,9 @@ export default function MyPageScreen() {
 
           <Pressable
             onPress={() => openLegalDocument(LEGAL_URLS.privacy)}
+            {...webKeyActivation(["Enter"], () =>
+              openLegalDocument(LEGAL_URLS.privacy),
+            )}
             testID="mypage.privacy.row"
             accessibilityRole="link"
             accessibilityLabel="개인정보 처리방침 보기"
